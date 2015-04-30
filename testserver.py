@@ -47,13 +47,12 @@ if sys.argv[1:]:
 else:
     PORT = 8000
 
-#Handler = SimpleHTTPServer.SimpleHTTPRequestHandler
 Handler = MyWankyHandler
 
+SocketServer.TCPServer.allow_reuse_address = True
 httpd = SocketServer.TCPServer(("", PORT), Handler)
+
 
 print "serving at port", PORT
 httpd.serve_forever()
 
-print 'lol'
-print data.readlines()
