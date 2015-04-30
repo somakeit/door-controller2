@@ -35,6 +35,8 @@ class MyWankyHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         global data
+        if self.headers.has_key('Cookie'):
+            print self.headers['Cookie']
         data = update_dict(data, json.loads(self.rfile.read(int(self.headers.getheader('content-length', 0)))))
         datafile = open(DATAFILE_NAME, 'w')
         datafile.write(json.dumps(data, sort_keys=True, indent=4, separators=(',', ': ')))
