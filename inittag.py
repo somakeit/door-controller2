@@ -36,10 +36,10 @@ sys.stdout.write("Validating tag..\n")
 sys.stdout.write("Writing credentials to database..\n")
 kayfile = False
 try:
-  keyfile = open('api_key', 'r')
+    keyfile = open('api_key', 'r')
 except IOError:
-  sys.stdout.write("Can't read file: 'api_key', you need the API Key in there.\n")
-  sys.exit(1)
+    sys.stdout.write("Can't read file: 'api_key', you need the API Key in there.\n")
+    sys.exit(1)
 
 api_key = keyfile.read().rstrip()
 keyfile.close()
