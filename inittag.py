@@ -5,6 +5,7 @@ import sys
 RANDOM_SOURCE = '/dev/urandom'
 SECRET_SIZE = 23      #bcrypt digest size
 SERVER_POST_URL = 'http://localhost:8000'    #use SSL
+api_key = 'lol'
 
 #read card NUID
 sys.stdout.write("Present tag..\n")
@@ -34,15 +35,6 @@ sys.stdout.write("Validating tag..\n")
 
 #send to server
 sys.stdout.write("Writing credentials to database..\n")
-kayfile = False
-try:
-    keyfile = open('api_key', 'r')
-except IOError:
-    sys.stdout.write("Can't read file: 'api_key', you need the API Key in there.\n")
-    sys.exit(1)
-
-api_key = keyfile.read().rstrip()
-keyfile.close()
 
 data = json.dumps(data)
 cookies = {'api_key': api_key}
