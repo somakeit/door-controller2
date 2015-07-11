@@ -1,22 +1,23 @@
 {
     "tags": {
         "9b8785b5": {
-            "sector_a_count": 0,
+            "count": 0,
             "sector_a_key_a": "a2V5IGEA",
             "sector_a_key_b": "a2V5IGIA",
             "sector_a_secret": "CvAKdlKXyxACUAPkXrKwNu0ADrEyh9k=",
             "sector_a_sector": 1,
-            "sector_b_count": 1,
             "sector_b_key_a": "a2V5IGEA",
             "sector_b_key_b": "a2V5IGIA",
             "sector_b_secret": "8Cd24Nme+qw3Bq7k1ocG+4YCfruoLfg=",
             "sector_b_sector": 2,
-            "assigned_user": "00000"
+            "assigned_user": "00000",
+            "blacklisted": 0
         }
     },
     "users": {
         "00000": {
-            "name": "Bob"
+            "name": "Bob",
+            "enabled": 1
         }
     }
 }
