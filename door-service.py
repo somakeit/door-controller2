@@ -59,3 +59,6 @@ class Tag:
         
     def str_hex_uid(self):
         return "0x" + format(self.uid[0], x) + format(self.uid[1], x) + format(self.uid[2], x) + format(self.uid[3], x)
+
+inst = DoorService()
+inst.main()
