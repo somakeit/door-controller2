@@ -4,11 +4,12 @@ import MFRC522
 
 class DoorService:
     nfc = None
-    dbase = None
+    db = None
 
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
-        self.dbase = EntryDatabase()
+        self.db = EntryDatabase()
+        print "Initialised"
 
     def main(self):
         while True:
@@ -22,7 +23,7 @@ class DoorService:
 	    # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet.
 	    (status,uid) = self.nfc.MFRC522_Anticoll()
 	    if status == self.nfc.MI_OK:
-	        tag = Tag(uid, self.nfc)
+	        tag = Tag(uid, self.nfc, self.db)
 	        print "Found tag UID: " + tag.str_x_uid()
 
 		#authenticate
@@ -63,29 +64,39 @@ class Tag:
         
         self.count = self.db.get_tag_count(self.str_x_uid())
 
-        self.count_a = self.validate_sector(self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()), self.db.get_tag_sector_a_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B), self.db.get_tag_sector_a_secret(self.str_x_uid()))
-        self.count_b = self.validate_sector(self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()), self.db.get_tag_sector_b_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B), self.db.get_tag_sector_b_secret(self.str_x_uid()))
+        self.nfc.MFRC522_SelectTag(self.uid)
 
-        #self.nfc.MFRC522_SelectTag(self.uid)
-        #status = self.nfc.Auth_Sector(self.nfc.PICC_AUTHENT1A, 0, [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF], self.uid)
-	#if status != self.nfc.MI_OK:
-        #    print "Authentication error"
-        #    return False
-        #(status, data) = self.nfc.Read_Sector(sector)
-        #if status == self.nfc.MI_OK:
-        #    print data
-        #else:
-        #    print "Read error"
-        #    return False
-        #
-        #nfc.MFRC522_StopCrypto1() #TODO work out the correct time to run this.
-        #return True
+        try:
+            sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()), self.db.get_tag_sector_a_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B) #TODO test missinig fields
+            sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()), self.db.get_tag_sector_b_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B)
+        except Exception as e:
+            #TODO test me
+            print "Failed to Read sector: " + e
+            return
+
+        print sector_a_data
+        print sector_b_data
+
+        #self.count_a = self.validate_sector(sector_a_data, self.db.get_tag_sector_a_secret(self.str_x_uid()))
+        #self.count_b = self.validate_sector(sector_b_data, self.db.get_tag_sector_b_secret(self.str_x_uid()))
+
+        nfc.MFRC522_StopCrypto1() #TODO work out the correct time to run this.
+        return True
 
     def validate_sector(self, sector_data, secret):
         #do the things
         return count
 
     def read_sector(self, sector, key, keyspec):
+        status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
+        if (status != self.nfc.MI_OK):
+            raise Exception("Failed to authenticate sector " + sector + " of Tag " + self.str_x_uid())
+
+        (status, data) = self.nfc.Read_Sector(sector)
+        if (status != self.nfc.MI_OK):
+            raise Exception("Failed to read sector " + sector + " of Tag " + self.str_x_uid())
+
+        return data
         
     def str_x_uid(self):
         return format(self.uid[0], "x") + format(self.uid[1], "x") + format(self.uid[2], "x") + format(self.uid[3], "x")
@@ -109,7 +120,8 @@ class EntryDatabase:
         self.server_url = settings['server_url']
         self.api_key = settings['api_key']
 
-        # pull server copy down, if this initial load fails we will exit and let systemd respawn us
+        # pull server copy down, if this initial load fails we will exit and let systemd respawn us, TODO: think about if we want to keep the cache on disk too
+        print "Connecting to " + self.server_url
         response = requests.get(self.server_url, {'api_key': self.api_key})
         self.local = json.loads(response.text)
 
@@ -125,6 +137,7 @@ class EntryDatabase:
         else:
             return False
 
+    #getters to keep the "database" schema out of the auth code
     def get_tag_count(self, uid):
         return self.local['tags'][uid]['count']
 
@@ -135,21 +148,21 @@ class EntryDatabase:
         return self.local['tag'][uid]['sector_b_sector']
 
     def get_tag_sector_a_key_a(self, uid):
-        return self.local['tag'][uid]['sector_a_key_a']
+        return map(ord, self.local['tag'][uid]['sector_a_key_a'])
     
     def get_tag_sector_a_key_b(self, uid):
-        return self.local['tag'][uid]['sector_a_key_b']
+        return map(ord, self.local['tag'][uid]['sector_a_key_b'])
     
     def get_tag_sector_b_key_a(self, uid):
-        return self.local['tag'][uid]['sector_b_key_a']
+        return map(ord, self.local['tag'][uid]['sector_b_key_a'])
     
     def get_tag_sector_b_key_b(self, uid):
-        return self.local['tag'][uid]['sector_b_key_b']
+        return map(ord, self.local['tag'][uid]['sector_b_key_b'])
     
     def get_tag_sector_a_secret(self, uid):
         return self.local['tag'][uid]['sector_a_secret']
 
-    def get_tag_sector_b_secter(self, uid):
+    def get_tag_sector_b_secret(self, uid):
         return self.local['tag'][uid]['sector_b_secret']
 
     def get_user_name(self, userid):
