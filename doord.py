@@ -1,4 +1,4 @@
-import sys, json, requests
+import sys, json, requests, base64
 sys.path.append("MFRC522-python")
 import MFRC522
 
@@ -27,9 +27,9 @@ class DoorService:
 	        print "Found tag UID: " + tag.str_x_uid()
 
 		#authenticate
-		if tag.authenticate:
+		if tag.authenticate():
 		    print "Tag " + tag.str_x_uid() + " authenticated"
-		    #open the door
+		    #TODO open the door
 		else:
 		    print "Tag " + tag.str_x_uid() + " NOT authenticated"
 
@@ -58,6 +58,7 @@ class Tag:
 
         if self.db.is_tag_blacklisted(self.str_x_uid()):
             print "BLACKLISTED TAG DETECTED: " + self.str_x_uid
+            return False
 
         username = self.db.get_user_name(userid)
         print "Tag is assigned to user " + userid + " (" + username + ")"
@@ -67,20 +68,21 @@ class Tag:
         self.nfc.MFRC522_SelectTag(self.uid)
 
         try:
-            sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()), self.db.get_tag_sector_a_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B) #TODO test missinig fields
+            sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()), self.db.get_tag_sector_a_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B) #TODO test missinig fields in db
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()), self.db.get_tag_sector_b_key_b(self.str_x_uid()), self.nfc.PICC_AUTHENT1B)
-        except Exception as e:
-            #TODO test me
-            print "Failed to Read sector: " + e
-            return
+        except TagError as e:
+            #TODO unit test me
+            print "Failed to Read sector: " + e.message
+            self.nfc.MFRC522_StopCrypto1()
+            return False
 
-        print sector_a_data
-        print sector_b_data
+        print "A: " + str(sector_a_data)
+        print "B: " + str(sector_b_data)
 
         #self.count_a = self.validate_sector(sector_a_data, self.db.get_tag_sector_a_secret(self.str_x_uid()))
         #self.count_b = self.validate_sector(sector_b_data, self.db.get_tag_sector_b_secret(self.str_x_uid()))
 
-        nfc.MFRC522_StopCrypto1() #TODO work out the correct time to run this.
+        self.nfc.MFRC522_StopCrypto1() #TODO work out the correct time to run this.
         return True
 
     def validate_sector(self, sector_data, secret):
@@ -88,18 +90,23 @@ class Tag:
         return count
 
     def read_sector(self, sector, key, keyspec):
+        print key
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if (status != self.nfc.MI_OK):
-            raise Exception("Failed to authenticate sector " + sector + " of Tag " + self.str_x_uid())
+            raise TagError("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
 
         (status, data) = self.nfc.Read_Sector(sector)
         if (status != self.nfc.MI_OK):
-            raise Exception("Failed to read sector " + sector + " of Tag " + self.str_x_uid())
+            raise TagError("Failed to read sector " + str(sector) + " of Tag " + self.str_x_uid())
 
         return data
         
     def str_x_uid(self):
         return format(self.uid[0], "x") + format(self.uid[1], "x") + format(self.uid[2], "x") + format(self.uid[3], "x")
+
+class TagError(Exception):
+    def __init__(self, message):
+        self.message = message
 
 class EntryDatabase:
     local = None
@@ -142,28 +149,28 @@ class EntryDatabase:
         return self.local['tags'][uid]['count']
 
     def get_tag_sector_a_sector(self, uid):
-        return self.local['tag'][uid]['sector_a_sector']
+        return self.local['tags'][uid]['sector_a_sector']
 
     def get_tag_sector_b_sector(self, uid):
-        return self.local['tag'][uid]['sector_b_sector']
+        return self.local['tags'][uid]['sector_b_sector']
 
     def get_tag_sector_a_key_a(self, uid):
-        return map(ord, self.local['tag'][uid]['sector_a_key_a'])
+        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_a']))
     
     def get_tag_sector_a_key_b(self, uid):
-        return map(ord, self.local['tag'][uid]['sector_a_key_b'])
+        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_b']))
     
     def get_tag_sector_b_key_a(self, uid):
-        return map(ord, self.local['tag'][uid]['sector_b_key_a'])
+        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_a']))
     
     def get_tag_sector_b_key_b(self, uid):
-        return map(ord, self.local['tag'][uid]['sector_b_key_b'])
+        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_b']))
     
     def get_tag_sector_a_secret(self, uid):
-        return self.local['tag'][uid]['sector_a_secret']
+        return self.local['tags'][uid]['sector_a_secret']
 
     def get_tag_sector_b_secret(self, uid):
-        return self.local['tag'][uid]['sector_b_secret']
+        return self.local['tags'][uid]['sector_b_secret']
 
     def get_user_name(self, userid):
         return self.local['users'][userid]['name']
