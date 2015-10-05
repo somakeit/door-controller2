@@ -1,7 +1,7 @@
 import bcrypt, sys, crc16
 
 BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-BCRYPT_VERSION = ['2', '2a', '2y']
+BCRYPT_VERSION = ['2', '2a', '2b', '2y']
 
 string = 'Hello world!'
 
