@@ -78,7 +78,7 @@ class Tag:
         
         self.count = self.db.get_tag_count(self.str_x_uid())
 
-        self.nfc.MFRC522_SelectTag(self.uid) #TODO handle errors
+        self.nfc.MFRC522_SelectTag(self.uid) #TODO handle errors, decide where to do this
 
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
@@ -110,7 +110,7 @@ class Tag:
             print "Failed to authenticate, both sectors corrupt"
             return False
 
-        if self.sector_a_ok and seld.sector_b_ok and (abs(self.count_a - self.count2) > 1):
+        if self.sector_a_ok and self.sector_b_ok and (abs(self.count_a - self.count2) > 1):
             #TESTME
             print "Warning: valid sector counts spaced higher than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
         if self.sector_a_ok and seld.sector_b_ok and (self.count_a == self.count_b):
@@ -168,17 +168,17 @@ class Tag:
     #return a validated count stored in the sector data given or False
     def validate_sector(self, sector_data, secret):
         #Assert crc16 matches sector or log corrupt sector and return
-        payload = "".join(map(chr, sector_data[0:45]))
+        payload = "".join(map(chr, sector_data[0:46]))
         crc = (sector_data[46] << 8) + sector_data[47]
         if not crc16.crc16xmodem(payload) == crc:
             #TESTME
             raise TagException("Sector data failed checksum")
 
-        count = (sector[0] << 8) + sector[1]
+        count = (sector_data[0] << 8) + sector_data[1]
         algorithm = sector_data[2]
         cost = sector_data[3]
-        digest = self.unencode_bcrypt64(sector_data[4:43])
-        reserved = sector_data[44:45]
+        digest = self.unencode_bcrypt64(sector_data[4:44])
+        reserved = sector_data[44:46]
         
         if algorithm > (len(self.BCRYPT_VERSION) - 1):
             #TESTME
@@ -189,13 +189,13 @@ class Tag:
                 #TESTME
                 raise TagException("Data in padding")
 
-        read_hash = '$' + str(self.BCRYPT_VERSION[algorithm]) + '$' + str(cost) + '$' + digest
+        read_hash = '$' + str(self.BCRYPT_VERSION[algorithm]) + '$' + str(cost).zfill(2) + '$' + digest
         
-        calculated_hash = bcrypt.haspw(str(count) + str(secret), read_hash)
+        calculated_hash = bcrypt.hashpw(str(count) + str(secret), read_hash)
 
         if calculated_hash != read_hash:
             #TESTME
-            return False
+            raise TagException("Hash does not match, count is not authentic.") #TODO is there enough logging to fully diagnose a cloned tag #TESTME clone tag
 
         return count
 
@@ -216,7 +216,7 @@ class Tag:
 
     #write a sector to the tag given the count and secret
     def write_sector(self, sector, key, keyspec, secret, count):
-        generated_hash = bcrypt.hashpw(str(count) + str(secret), bcrypt.gensalt(self.BCRYPT_COST)) #TODO this function can't handle nul chars in secrets
+        generated_hash = bcrypt.hashpw(str(count) + str(secret), bcrypt.gensalt(self.BCRYPT_COST)) #TODO this function can't handle nul chars or unicode in secrets
         hash_parts = generated_hash.split("$")
 
         data = []
@@ -242,6 +242,18 @@ class Tag:
         (status, backData) = nfc.Write_Block(sector * 4 + 2, data[32:48])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 2) + " of Tag " + self.str_x_uid())
+
+    def configure_sector(self, sector, key, keyspec, key_a, lock_bytes, key_b):
+        status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
+        if status != nfc.MI_OK:
+            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
+        data = []
+        data.extend(key_a)
+        data.extend(lock_bytes)
+        data.extend(key_b)
+        (status, backData) = nfc.Write_Block(sector * 4 + 3, data)
+        if (status != self.nfc.MI_OK):
+            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 3) + " of Tag " + self.str_x_uid())
 
     #convert from binary byte array to bcrypt base64
     def unencode_bcrypt64(self, binary_arr):
@@ -360,11 +372,22 @@ class EntryDatabase:
         return self.local['users'][userid]['name']
 
 #initialise a tag using well known sector keys
-if sys.argv[1] == "safetag":
+if len(sys.argv) > 1:
+    if sys.argv[1] != "safe":
+        print "python doord.py [init|safe|help]"
+        print ""
+        print "The door authentiction server, runs as a deamon with no arguments."
+        print "Put the server url and api_key in the doorrc file."
+        print "    init - Initialise a tag and add it to thre server."
+        print "    safe - Initialise a tag with well known keys ('key a' and"
+        print "           'key b', big endian ASCII encoded)."
+        print "    help - Show this help document."
+        sys.exit(2)
+
     nfc = MFRC522.MFRC522()
     db = EntryDatabase()
     print "Initing tag with well known keys \"key a\" and \"key b\""
-    print "Preset tag.."
+    print "Present tag.."
     status = nfc.MI_NOTAGERR
 
     # wait for an nfc device to be presented
@@ -380,28 +403,81 @@ if sys.argv[1] == "safetag":
 
         sector_a_secret = os.urandom(23)
         sector_b_secret = os.urandom(23)
+        default_key = [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]
+        default_keyspec = nfc.PICC_AUTHENT1A
         sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
         sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
         sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
         sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-        sector_lock_bytes = [0x7F,0x07,0x88,0x69]
+        sector_lock_bytes = [0x7F,0x07,0x88,0x69] #key a r/w, key b r/w/conf
 
         nfc.MFRC522_SelectTag(uid)
 
-        print "Writing sector 1"
-        tag.write_sector(1,
-                         [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
-                         nfc.PICC_AUTHENT1A,
-                         sector_a_secret,
-                         0)
-        print "Writing sector 2"
-        tag.write_sector(2,
-                         [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
-                         nfc.PICC_AUTHENT1A,
-                         sector_b_secret,
-                         1)
+        try:
+            print "Writing sector 1"
+            tag.write_sector(1,
+                             default_key,
+                             default_keyspec,
+                             sector_a_secret,
+                             0)
+            print "Writing sector 2"
+            tag.write_sector(2,
+                             default_key,
+                             default_keyspec,
+                             sector_b_secret,
+                             1)
+            print "Readback sectors"
+            sector_a_backdata = tag.read_sector(1,
+                                                default_key,
+                                                default_keyspec)
+            readback_a = tag.validate_sector(sector_a_backdata,
+                                             sector_a_secret)
+            if readback_a != 0:
+                raise Exception("sector a (1) readback not correct.")
+            
+            sector_b_backdata = tag.read_sector(2,
+                                                default_key,
+                                                default_keyspec)
+            readback_b = tag.validate_sector(sector_b_backdata,
+                                             sector_b_secret)
+            if readback_b != 1:
+                raise  Exception("sector b (2) readback not correct.")
 
-    sys.exit(0)
+            print "Securing sectors"
+            tag.configure_sector(1, default_key, default_keyspec, sector_a_key_a, sector_lock_bytes, sector_a_key_b)
+            tag.configure_sector(2, default_key, default_keyspec, sector_b_key_a, sector_lock_bytes, sector_b_key_b)
+
+            print "Readback sectors"
+            sector_a_backdata = tag.read_sector(1,
+                                                sector_a_key_a,
+                                                default_keyspec)
+            readback_a = tag.validate_sector(sector_a_backdata,
+                                             sector_a_secret)
+            if readback_a != 0:
+                raise Exception("sector a (1) readback not correct.")
+        
+            sector_b_backdata = tag.read_sector(2,
+                                                sector_b_key_a,
+                                                default_keyspec)
+            readback_b = tag.validate_sector(sector_b_backdata,
+                                             sector_b_secret)
+            if readback_b != 1:
+                raise Exception("sector b (2) readback not correct.")
+
+        except Exception as e:
+            print "sector a (1):"
+            print "  key a: " + str(sector_a_key_a)
+            print "  key b: " + str(sector_a_key_a)
+            print "sector b (2):"
+            print "  key a: " + str(sector_b_key_a)
+            print "  key b: " + str(sector_b_key_a)
+            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!" #TODO log out keys on failure, do not update db first, it could brick an existing card
+            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            raise
+
+        sys.exit(0)
+
 
 inst = DoorService()
 inst.main()
