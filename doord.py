@@ -1,8 +1,7 @@
-import sys, json, requests, base64
+import sys, os, json, requests, base64
 import crc16, bcrypt
 sys.path.append("MFRC522-python")
 import MFRC522
-
 
 class DoorService:
     nfc = None
@@ -14,22 +13,17 @@ class DoorService:
         print "Initialised"
 
     def main(self):
-        last_tag = None
         while True:
-	    status = self.nfc.MI_NOTAGERR
+            status = self.nfc.MI_NOTAGERR
 
 	    # wait for an nfc device to be presented
 	    while status != self.nfc.MI_OK:
-                #TODO a polling rate to reduce CPU use
-                last_tag = None
+                #TODO a polling rate to reduce CPU use and tag de-bounce
 	        (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
 	    print "NFC device presented"
 	    
 	    # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
 	    (status,uid) = self.nfc.MFRC522_Anticoll()
-	    if uid == last_tag:
-                continue
-            last_tag == uid
             if status == self.nfc.MI_OK:
 	        tag = Tag(uid, self.nfc, self.db)
 	        print "Found tag UID: " + tag.str_x_uid()
@@ -41,6 +35,8 @@ class DoorService:
 		else:
 		    print "Tag " + tag.str_x_uid() + " NOT authenticated"
 
+                del tag
+
 	    else:
 	        print "Failed to read UID"
 
@@ -51,6 +47,8 @@ class Tag:
     count = None    #the correct count
     count_a = None  #counts read from tag
     count_b = None
+    sector_a_ok = True
+    sector_b_ok = True
     BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
     BCRYPT_COST = 12    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed (TODO that)
@@ -85,33 +83,39 @@ class Tag:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_a_key_b(self.str_x_uid()),
                                              self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields
+        
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_b_key_b(self.str_x_uid()),
                                              self.nfc.PICC_AUTHENT1B)
         except TagException as e:
-            #TESTME
-            print "Failed to Read sector: " + e
+            #TESTME one and both
+            print "Failed to Read sector: " + str(e)
             return False
-
-        print sector_a_data
-        print sector_b_data
-
+        
         try:
             self.count_a = self.validate_sector(sector_a_data,
                                                 self.db.get_tag_sector_a_secret(self.str_x_uid()))
+        except TagException as e:
+            print "Failed to validate sector a: " + str(e)
+            self.sector_a_ok = False
+        try:
             self.count_b = self.validate_sector(sector_b_data,
                                                 self.db.get_tag_sector_b_secret(self.str_x_uid()))
         except TagException as e:
-            print "Failed to validate sector: " + e
+            print "Failed to validate sector b: " + str(e)
+            self.sector_b_ok = False
+
+        if (self.sector_a_ok == False) and (self.sector_b_ok == False):
+            print "Failed to authenticate, both sectors corrupt"
             return False
 
-        if abs(self.count_a - self.count2) > 1:
+        if self.sector_a_ok and seld.sector_b_ok and (abs(self.count_a - self.count2) > 1):
             #TESTME
             print "Warning: valid sector counts spaced higher than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
-        if self.count_a == self.count_b:
+        if self.sector_a_ok and seld.sector_b_ok and (self.count_a == self.count_b):
             print "Warning: valid sector counts spaced lower than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
         
-        if self.greater_than(self.count_a, self.count_b):
+        if self.greater_than(self.count_a, self.count_b) or (not sector_b_ok):
             if self.less_than(iself.count_a, self.count):
                 print "Duplicate card detected, expected count: " + str(self.count) + " Found count: " + str(self.count_a)
                 return False
@@ -127,7 +131,7 @@ class Tag:
                 readback = self.validate_sector(sector_b_backdata,
                                                 self.db.get_tag_sector_b_secret(self.str_x_uid()))
             except TagException as e:
-                print "Failed to update tag: " + e
+                print "Failed to update tag: " + str(e)
                 return False
 
             if readback != (self.plus(self.count_a, 1)):
@@ -150,7 +154,7 @@ class Tag:
                 readback = self.validate_sector(sector_a_backdata,
                                                 self.db.get_tag_sector_a_secret(self.str_x_uid()))
             except TagException as e:
-                print "Failed to update tag: " + e
+                print "Failed to update tag: " + str(e)
                 return False
 
             if readback != (self.plus(self.count_b, 1)):
@@ -163,11 +167,11 @@ class Tag:
     #return a validated count stored in the sector data given or False
     def validate_sector(self, sector_data, secret):
         #Assert crc16 matches sector or log corrupt sector and return
-        payload = "".join(sector_data[0:45])
+        payload = "".join(map(chr, sector_data[0:45]))
         crc = (sector_data[46] << 8) + sector_data[47]
         if not crc16.crc16xmodem(payload) == crc:
             #TESTME
-            raise TagException("Corrupted sector data")
+            raise TagException("Sector data failed checksum")
 
         count = (sector[0] << 8) + sector[1]
         algorithm = sector_data[2]
@@ -198,11 +202,11 @@ class Tag:
     def read_sector(self, sector, key, keyspec):
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to authenticate sector " + sector + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
 
         (status, data) = self.nfc.Read_Sector(sector)
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to read sector " + sector + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to read sector " + str(sector) + " of Tag " + self.str_x_uid())
 
         return data
         
@@ -221,7 +225,7 @@ class Tag:
         data.append(int(hash_parts[2])) #cost
         data.append(self.encode_bcrypt64(hash_parts[3])) #salt & digest
         data.append([0, 0]) #padding
-        data.append(crc16.crc16xmodem("".join(data))) #crc
+        data.append(crc16.crc16xmodem("".join(map(chr, data)))) #crc
         
         status = nfc.Auth_Block(keyspec, sector * 4, key, self.uid)
         if status != nfc.MI_OK:
@@ -347,6 +351,44 @@ class EntryDatabase:
     def get_user_name(self, userid):
         return self.local['users'][userid]['name']
 
+#initialise a tag using well known sector keys
+if sys.argv[1] == "safetag":
+    nfc = MFRC522.MFRC522()
+    db = EntryDatabase()
+    print "Initing tag with well known keys \"key a\" and \"key b\""
+    status = nfc.MI_NOTAGERR
+
+    # wait for an nfc device to be presented
+    while status != self.nfc.MI_OK:
+        (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
+        print "NFC device presented"
+	    
+        # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
+        (status,uid) = self.nfc.MFRC522_Anticoll()
+        if status == self.nfc.MI_OK:
+	    tag = Tag(uid, nfc, db)
+	    print "Found tag UID: " + tag.str_x_uid()
+
+            sector_a_secret = os.urandom(23)
+            sector_b_secret = os.urandom(23)
+            sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
+            sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
+            sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
+            sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
+            sector_lock_bytes = [0x7F,0x07,0x88,0x69]
+
+            self.write_sector(1,
+                              [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
+                              self.nfc.PICC_AUTHENT1B,
+                              sector_a_secret,
+                              0)
+            slef.write_sector(2,
+                              [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
+                              self.nfc.PICC_AUTHENT1B,
+                              sector_b_secret,
+                              1)
+
+    sys.exit(0)
 
 inst = DoorService()
 inst.main()
