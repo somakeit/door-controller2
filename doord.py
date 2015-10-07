@@ -1,4 +1,5 @@
 import sys, os, json, requests, base64
+from math import ceil
 import crc16, bcrypt
 sys.path.append("MFRC522-python")
 import MFRC522
@@ -51,7 +52,7 @@ class Tag:
     sector_b_ok = True
     BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
-    BCRYPT_COST = 12    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed (TODO that)
+    BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed (TODO that)
 
     #create tag object representing one session with one tag
     def __init__(self, uid, nfc, db):
@@ -77,7 +78,7 @@ class Tag:
         
         self.count = self.db.get_tag_count(self.str_x_uid())
 
-        self.nfc.MFRC522_SelectTag(self.uid)
+        self.nfc.MFRC522_SelectTag(self.uid) #TODO handle errors
 
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
@@ -215,47 +216,54 @@ class Tag:
 
     #write a sector to the tag given the count and secret
     def write_sector(self, sector, key, keyspec, secret, count):
-        generated_hash = bcrypt.hashpw(str(count) + str(secret), bcrypt.gensalt(slef.BCRYPT_COST))
-        hash_parts = "$".split(generated_hash)
+        generated_hash = bcrypt.hashpw(str(count) + str(secret), bcrypt.gensalt(self.BCRYPT_COST)) #TODO this function can't handle nul chars in secrets
+        hash_parts = generated_hash.split("$")
 
         data = []
         data.append(count >> 8)
         data.append(count & 0xFF)
         data.append(self.BCRYPT_VERSION.index(hash_parts[1])) #bcrypt algorithm
         data.append(int(hash_parts[2])) #cost
-        data.append(self.encode_bcrypt64(hash_parts[3])) #salt & digest
-        data.append([0, 0]) #padding
-        data.append(crc16.crc16xmodem("".join(map(chr, data)))) #crc
+        data.extend(self.encode_bcrypt64(hash_parts[3])) #salt & digest
+        data.extend([0, 0]) #padding
+        crc = crc16.crc16xmodem("".join(map(chr, data))) #crc
+        data.append(crc >> 8)
+        data.append(crc & 0xFF)
         
-        status = nfc.Auth_Block(keyspec, sector * 4, key, self.uid)
+        status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if status != nfc.MI_OK:
-            raise TagException("Failed to read sector " + str(sector) + " of Tag " + self.str_x_uid())
-        (status, backData) = nfc.Write_Block(sector * 4, data[0,15])
+            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
+        (status, backData) = nfc.Write_Block(sector * 4, data[0:16])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4) + " of Tag " + self.str_x_uid())
-        (status, backData) = nfc.Write_Block(sector * 4 + 1, data[16,31])
+        (status, backData) = nfc.Write_Block(sector * 4 + 1, data[16:32])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 1) + " of Tag " + self.str_x_uid())
-        (status, backData) = nfc.Write_Block(sector * 4 + 2, data[32,47])
+        (status, backData) = nfc.Write_Block(sector * 4 + 2, data[32:48])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 2) + " of Tag " + self.str_x_uid())
 
     #convert from binary byte array to bcrypt base64
-    def unencode_bcrypt64(binary):
+    def unencode_bcrypt64(self, binary_arr):
         base64 = ""
-        for i in range(len(binary)):
+        i = 0
+        binary = 0
+        for c in binary_arr:
+            binary = binary + (c << i)
+            i += 8
+        for i in range(int(len(binary_arr)*8/6.0)):
             base64 = base64 + str(list(self.BCRYPT_BASE64_DICT)[(binary >> (i * 6)) & 63])
         return base64
 
-    #convert from bcrupt base64 format to binary byte array
-    def encode_bcrypt64(base64):
+    #convert from bcrypt base64 format to binary byte array
+    def encode_bcrypt64(self, base64):
         binary_int = 0
         i = 0
         for c in list(base64):
             binary_int = binary_int + (self.BCRYPT_BASE64_DICT.index(c) << i)
             i += 6
         binary = []
-        for i in range(len(base64)/8*6):
+        for i in range(int(ceil(len(list(base64))*6/8.0))):
             binary.append(int(((binary_int >> (i * 8)) & 0xff)))
         return binary            
 
@@ -356,37 +364,42 @@ if sys.argv[1] == "safetag":
     nfc = MFRC522.MFRC522()
     db = EntryDatabase()
     print "Initing tag with well known keys \"key a\" and \"key b\""
+    print "Preset tag.."
     status = nfc.MI_NOTAGERR
 
     # wait for an nfc device to be presented
-    while status != self.nfc.MI_OK:
-        (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
-        print "NFC device presented"
+    while status != nfc.MI_OK:
+        (status,TagType) = nfc.MFRC522_Request(nfc.PICC_REQIDL)
+    print "NFC device presented"
 	    
-        # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
-        (status,uid) = self.nfc.MFRC522_Anticoll()
-        if status == self.nfc.MI_OK:
-	    tag = Tag(uid, nfc, db)
-	    print "Found tag UID: " + tag.str_x_uid()
+    # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
+    (status,uid) = nfc.MFRC522_Anticoll()
+    if status == nfc.MI_OK:
+        tag = Tag(uid, nfc, db)
+	print "Found tag UID: " + tag.str_x_uid()
 
-            sector_a_secret = os.urandom(23)
-            sector_b_secret = os.urandom(23)
-            sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
-            sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-            sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
-            sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-            sector_lock_bytes = [0x7F,0x07,0x88,0x69]
+        sector_a_secret = os.urandom(23)
+        sector_b_secret = os.urandom(23)
+        sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
+        sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
+        sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
+        sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
+        sector_lock_bytes = [0x7F,0x07,0x88,0x69]
 
-            self.write_sector(1,
-                              [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
-                              self.nfc.PICC_AUTHENT1B,
-                              sector_a_secret,
-                              0)
-            slef.write_sector(2,
-                              [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
-                              self.nfc.PICC_AUTHENT1B,
-                              sector_b_secret,
-                              1)
+        nfc.MFRC522_SelectTag(uid)
+
+        print "Writing sector 1"
+        tag.write_sector(1,
+                         [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
+                         nfc.PICC_AUTHENT1A,
+                         sector_a_secret,
+                         0)
+        print "Writing sector 2"
+        tag.write_sector(2,
+                         [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF],
+                         nfc.PICC_AUTHENT1A,
+                         sector_b_secret,
+                         1)
 
     sys.exit(0)
 
