@@ -53,6 +53,7 @@ class Tag:
     BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
     BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed (TODO that)
+    SECTOR_LOCK_BYTES = [0x7F,0x07,0x88,0x69] #key a r/w, key b r/w/conf
 
     #create tag object representing one session with one tag
     def __init__(self, uid, nfc, db):
@@ -62,15 +63,14 @@ class Tag:
 
     #attempt the whole authentication process with this tag
     def authenticate(self):
-        userid = self.db.get_tag_user(self.str_x_uid())
-        if userid == None:
+        try:
+            userid = self.db.get_tag_user(self.str_x_uid())
+        except Exception as e:
             #TESTME
-            print "Tag " + self.str_x_uid() + " is alien"
-            return False
-
-        if self.db.is_tag_blacklisted(self.str_x_uid()):
-            #TESTME
-            print "BLACKLISTED TAG DETECTED: " + self.str_x_uid
+            if str(e) == "Unkown tag":
+                print "Tag " + self.str_x_uid() + " is alien"
+            elif str(e) == "Unassigned tag":
+                print "Tag " + self.str_x_uid() + " is not assigned to anyone"
             return False
 
         username = self.db.get_user_name(userid)
@@ -83,7 +83,7 @@ class Tag:
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_a_key_b(self.str_x_uid()),
-                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields
+                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields TODO, hanbdle any missing json fields
         
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_b_key_b(self.str_x_uid()),
@@ -107,17 +107,17 @@ class Tag:
             self.sector_b_ok = False
 
         if (self.sector_a_ok == False) and (self.sector_b_ok == False):
-            print "Failed to authenticate, both sectors corrupt"
+            print "Failed to authenticate, both sectors invalid"
             return False
 
-        if self.sector_a_ok and self.sector_b_ok and (abs(self.count_a - self.count2) > 1):
+        if self.sector_a_ok and self.sector_b_ok and (abs(self.count_a - self.count_b) > 1):
             #TESTME
             print "Warning: valid sector counts spaced higher than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
-        if self.sector_a_ok and seld.sector_b_ok and (self.count_a == self.count_b):
+        if self.sector_a_ok and self.sector_b_ok and (self.count_a == self.count_b):
             print "Warning: valid sector counts spaced lower than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
         
-        if self.greater_than(self.count_a, self.count_b) or (not sector_b_ok):
-            if self.less_than(iself.count_a, self.count):
+        if self.greater_than(self.count_a, self.count_b) or (not self.sector_b_ok):
+            if self.less_than(self.count_a, self.count):
                 print "Duplicate card detected, expected count: " + str(self.count) + " Found count: " + str(self.count_a)
                 return False
             try:
@@ -231,15 +231,15 @@ class Tag:
         data.append(crc & 0xFF)
         
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
-        if status != nfc.MI_OK:
+        if status != self.nfc.MI_OK:
             raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
-        (status, backData) = nfc.Write_Block(sector * 4, data[0:16])
+        (status, backData) = self.nfc.Write_Block(sector * 4, data[0:16])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4) + " of Tag " + self.str_x_uid())
-        (status, backData) = nfc.Write_Block(sector * 4 + 1, data[16:32])
+        (status, backData) = self.nfc.Write_Block(sector * 4 + 1, data[16:32])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 1) + " of Tag " + self.str_x_uid())
-        (status, backData) = nfc.Write_Block(sector * 4 + 2, data[32:48])
+        (status, backData) = self.nfc.Write_Block(sector * 4 + 2, data[32:48])
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 2) + " of Tag " + self.str_x_uid())
 
@@ -302,7 +302,8 @@ class TagException(Exception):
     pass
 
 class EntryDatabase:
-    local = None
+    local = {}
+    unsent = {}
     server_url = None
     api_key = None
 
@@ -322,51 +323,105 @@ class EntryDatabase:
 
         # pull server copy down, if this initial load fails we will exit and let systemd respawn us, TODO: think about if we want to keep the cache on disk too
         print "Connecting to " + self.server_url
-        response = requests.get(self.server_url, {'api_key': self.api_key})
+        response = requests.get(self.server_url, cookies={'api_key': self.api_key})
         self.local = json.loads(response.text)
 
-    def get_tag_user(self, uid):
-        if self.local['tags'].has_key(uid):
-            return self.local['tags'][uid]['assigned_user']
-        else:
-            return None
+        if not self.local.has_key("users"):
+            self.local["users"] = {}
+        if not self.local.has_key("tags"):
+            self.local["tags"] = {}
 
-    def is_tag_blacklisted(self, uid):
-        if self.local['tags'][uid]['blacklisted']:
-            return True
-        else:
-            return False
-    
-    def blacklist_tag(uid):
-        return #TODO
+    def commit(self):
+        if len(self.unsent) < 1:
+            raise Exception("Nothing to send.")
+        response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(self.unsent))
+        if 200 < response.status_code <= 300:
+            raise Exception("Request returned bad status: " + str(response.status_code)) #TODO some sort of re-try for no net connection & no server
+
+    def get_tag_user(self, uid):
+        if not self.local['tags'].has_key(uid):
+            raise Exception("Unkown tag")
+        if not self.local["tags"][uid].has_key('assigned_user'):
+            raise Exception("Unassigned tag")
+        return self.local['tags'][uid]['assigned_user']
 
     #getters to keep the "database" schema out of the auth code
     def get_tag_count(self, uid):
         return self.local['tags'][uid]['count']
 
+    def vivify(self, dic, keys, value):
+        key = keys.pop(0)
+        if not dic.has_key(key):
+            if len(keys) < 1:
+                dic[key] = value
+            else:
+                dic[key] = {}
+                self.vivify(dic[key], keys, value)
+        else:
+            if len(keys) < 1:
+                dic[key] = value
+            else:
+                self.vivify(dic[key], keys, value)
+      
+    def set_tag_count(self, uid, count):
+        self.vivify(self.local, ['tags',uid,'count'], count)
+        self.vivify(self.unsent, ['tags',uid,'count'],  count)
+
     def get_tag_sector_a_sector(self, uid):
         return self.local['tags'][uid]['sector_a_sector']
+
+    def set_tag_sector_a_sector(self, uid, sector):
+        self.vivify(self.local, ['tags',uid,'sector_a_sector'], sector)
+        self.vivify(self.unsent, ['tags',uid,'sector_a_sector'], sector)
 
     def get_tag_sector_b_sector(self, uid):
         return self.local['tags'][uid]['sector_b_sector']
 
+    def set_tag_sector_b_sector(self, uid, sector):
+        self.vivify(self.local, ['tags',uid,'sector_b_sector'], sector)
+        self.vivify(self.unsent, ['tags',uid,'sector_b_sector'], sector)
+
     def get_tag_sector_a_key_a(self, uid):
         return map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_a']))
+
+    def set_tag_sector_a_key_a(self, uid, key):
+        self.vivify(self.local, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(self.unsent, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_a_key_b(self, uid):
         return map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_b']))
+
+    def set_tag_sector_a_key_b(self, uid, key):
+        self.vivify(self.local, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(self.unsent, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_b_key_a(self, uid):
         return map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_a']))
+
+    def set_tag_sector_b_key_a(self, uid, key):
+        self.vivify(self.local, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(self.unsent, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_b_key_b(self, uid):
         return map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_b']))
+
+    def set_tag_sector_b_key_b(self, uid, key):
+        self.vivify(self.local, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(self.unsent, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_a_secret(self, uid):
-        return self.local['tags'][uid]['sector_a_secret']
+        return base64.b64decode(self.local['tags'][uid]['sector_a_secret'])
+    
+    def set_tag_sector_a_secret(self, uid, secret):
+        self.vivify(self.local, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
+        self.vivify(self.unsent, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
 
     def get_tag_sector_b_secret(self, uid):
-        return self.local['tags'][uid]['sector_b_secret']
+        return base64.b64decode(self.local['tags'][uid]['sector_b_secret'])
+    
+    def set_tag_sector_b_secret(self, uid, secret):
+        self.vivify(self.local, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
+        self.vivify(self.unsent, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
 
     def get_user_name(self, userid):
         return self.local['users'][userid]['name']
@@ -409,7 +464,6 @@ if len(sys.argv) > 1:
         sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
         sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
         sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-        sector_lock_bytes = [0x7F,0x07,0x88,0x69] #key a r/w, key b r/w/conf
 
         nfc.MFRC522_SelectTag(uid)
 
@@ -444,8 +498,8 @@ if len(sys.argv) > 1:
                 raise  Exception("sector b (2) readback not correct.")
 
             print "Securing sectors"
-            tag.configure_sector(1, default_key, default_keyspec, sector_a_key_a, sector_lock_bytes, sector_a_key_b)
-            tag.configure_sector(2, default_key, default_keyspec, sector_b_key_a, sector_lock_bytes, sector_b_key_b)
+            tag.configure_sector(1, default_key, default_keyspec, sector_a_key_a, tag.SECTOR_LOCK_BYTES, sector_a_key_b)
+            tag.configure_sector(2, default_key, default_keyspec, sector_b_key_a, tag.SECTOR_LOCK_BYTES, sector_b_key_b)
 
             print "Readback sectors"
             sector_a_backdata = tag.read_sector(1,
@@ -475,6 +529,19 @@ if len(sys.argv) > 1:
             print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!" #TODO log out keys on failure, do not update db first, it could brick an existing card
             print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
             raise
+
+        print "Sending tag details to server."
+        db.set_tag_count(tag.str_x_uid(), 1)
+        db.set_tag_sector_a_sector(tag.str_x_uid(), 1)
+        db.set_tag_sector_b_sector(tag.str_x_uid(), 2)
+        db.set_tag_sector_a_secret(tag.str_x_uid(), sector_a_secret)
+        db.set_tag_sector_b_secret(tag.str_x_uid(), sector_b_secret)
+        db.set_tag_sector_a_key_a(tag.str_x_uid(), sector_a_key_a)
+        db.set_tag_sector_a_key_b(tag.str_x_uid(), sector_a_key_b)
+        db.set_tag_sector_b_key_a(tag.str_x_uid(), sector_b_key_a)
+        db.set_tag_sector_b_key_b(tag.str_x_uid(), sector_b_key_b)
+        db.commit()
+        print "Success."
 
         sys.exit(0)
 
