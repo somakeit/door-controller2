@@ -117,7 +117,7 @@ class Tag:
         if sector_a_ok and sector_b_ok and (self.count_a == self.count_b):
             print "Warning: valid sector counts spaced lower than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
         
-        if (not sector_b_ok) or self.greater_than(self.count_a, self.count_b):
+        if (not sector_b_ok) or (sector_a_ok and self.greater_than(self.count_a, self.count_b)):
             if self.less_than(self.count_a, self.count):
                 print "Duplicate card detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_a)
                 return False
