@@ -48,8 +48,6 @@ class Tag:
     count = None    #the correct count
     count_a = None  #counts read from tag
     count_b = None
-    sector_a_ok = True
-    sector_b_ok = True
     BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
     BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed (TODO that)
@@ -63,6 +61,9 @@ class Tag:
 
     #attempt the whole authentication process with this tag
     def authenticate(self):
+        sector_a_ok = True
+        sector_b_ok = True
+
         try:
             userid = self.db.get_tag_user(self.str_x_uid())
         except Exception as e:
@@ -84,7 +85,7 @@ class Tag:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_a_key_b(self.str_x_uid()),
                                              self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields TODO, hanbdle any missing json fields
-        
+
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_b_key_b(self.str_x_uid()),
                                              self.nfc.PICC_AUTHENT1B)
@@ -98,28 +99,30 @@ class Tag:
                                                 self.db.get_tag_sector_a_secret(self.str_x_uid()))
         except TagException as e:
             print "Failed to validate sector a: " + str(e)
-            self.sector_a_ok = False
+            sector_a_ok = False
         try:
             self.count_b = self.validate_sector(sector_b_data,
                                                 self.db.get_tag_sector_b_secret(self.str_x_uid()))
         except TagException as e:
             print "Failed to validate sector b: " + str(e)
-            self.sector_b_ok = False
+            sector_b_ok = False
 
-        if (self.sector_a_ok == False) and (self.sector_b_ok == False):
+        if (sector_a_ok == False) and (sector_b_ok == False):
             print "Failed to authenticate, both sectors invalid"
             return False
 
-        if self.sector_a_ok and self.sector_b_ok and (abs(self.count_a - self.count_b) > 1):
+        if sector_a_ok and sector_b_ok and (abs(self.count_a - self.count_b) > 1):
             #TESTME
             print "Warning: valid sector counts spaced higher than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
-        if self.sector_a_ok and self.sector_b_ok and (self.count_a == self.count_b):
+        if sector_a_ok and sector_b_ok and (self.count_a == self.count_b):
             print "Warning: valid sector counts spaced lower than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
         
-        if self.greater_than(self.count_a, self.count_b) or (not self.sector_b_ok):
+        if (not sector_b_ok) or self.greater_than(self.count_a, self.count_b):
             if self.less_than(self.count_a, self.count):
-                print "Duplicate card detected, expected count: " + str(self.count) + " Found count: " + str(self.count_a)
+                print "Duplicate card detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_a)
                 return False
+            if self.greater_than(self.count_a, self.count):
+                print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_a) + ", continueing"
             try:
                 self.write_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
                                   self.db.get_tag_sector_b_key_b(self.str_x_uid()),
@@ -139,10 +142,16 @@ class Tag:
                 #TESTME, maybe, it's hard
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_a, 1)) + " Got: " + str(readback)
                 return False
+
+            self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_a, 1))
+            self.db.commit()
         else:
             if self.less_than(self.count_b, self.count):
-                print "Duplicate card detected, expected count: " + str(self.count) + " Found count: " + str(self.count_b)
+                print "Duplicate card detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
                 return False
+            if self.greater_than(self.count_b, self.count):
+                print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_b) + ", Continueing"
+
             try:
                 self.write_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
                                   self.db.get_tag_sector_a_key_b(self.str_x_uid()),
@@ -162,6 +171,9 @@ class Tag:
                 #TESTME, maybe, it's hard
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_b, 1)) + " Got: " + str(readback)
                 return False
+
+            self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_b, 1))
+            self.db.commit()
         
         return True
 
