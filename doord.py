@@ -447,7 +447,7 @@ class EntryDatabase:
 
 #initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
 if len(sys.argv) > 1:
-    if sys.argv[1] != "safe":
+    if sys.argv[1] != "safe" and sys.argv[1] != "init":
         print "python doord.py [init|safe|help]"
         print ""
         print "The door authentiction server, runs as a deamon with no arguments."
@@ -556,6 +556,19 @@ if len(sys.argv) > 1:
             if readback_b != 1:
                 raise Exception("sector b (2) readback not correct.")
 
+            print "Sending tag details to server."
+            db.set_tag_count(tag.str_x_uid(), 1)
+            db.set_tag_sector_a_sector(tag.str_x_uid(), 1)
+            db.set_tag_sector_b_sector(tag.str_x_uid(), 2)
+            db.set_tag_sector_a_secret(tag.str_x_uid(), sector_a_secret)
+            db.set_tag_sector_b_secret(tag.str_x_uid(), sector_b_secret)
+            db.set_tag_sector_a_key_a(tag.str_x_uid(), sector_a_key_a)
+            db.set_tag_sector_a_key_b(tag.str_x_uid(), sector_a_key_b)
+            db.set_tag_sector_b_key_a(tag.str_x_uid(), sector_b_key_a)
+            db.set_tag_sector_b_key_b(tag.str_x_uid(), sector_b_key_b)
+            db.commit()
+            print "Success."
+
         except Exception as e:
             print "sector a (1):"
             print "  key a: " + str(sector_a_key_a)
@@ -563,28 +576,14 @@ if len(sys.argv) > 1:
             print "sector b (2):"
             print "  key a: " + str(sector_b_key_a)
             print "  key b: " + str(sector_b_key_b)
-            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-            print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!"
-            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            print "FAILED TO WRITE TAG or UPDATE SERVER - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!"
+            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
             #make doubly sure this gets logged
             syslog.syslog("doord: Failed to init a tag, keys attempted were: sector a (1): key a: " + str(sector_a_key_a) + " key b: " + str(sector_a_key_b) + " sector b (2): key a: " + str(sector_b_key_a) + "  key b: " + str(sector_b_key_b))
             raise
 
-        print "Sending tag details to server."
-        db.set_tag_count(tag.str_x_uid(), 1)
-        db.set_tag_sector_a_sector(tag.str_x_uid(), 1)
-        db.set_tag_sector_b_sector(tag.str_x_uid(), 2)
-        db.set_tag_sector_a_secret(tag.str_x_uid(), sector_a_secret)
-        db.set_tag_sector_b_secret(tag.str_x_uid(), sector_b_secret)
-        db.set_tag_sector_a_key_a(tag.str_x_uid(), sector_a_key_a)
-        db.set_tag_sector_a_key_b(tag.str_x_uid(), sector_a_key_b)
-        db.set_tag_sector_b_key_a(tag.str_x_uid(), sector_b_key_a)
-        db.set_tag_sector_b_key_b(tag.str_x_uid(), sector_b_key_b)
-        db.commit()
-        print "Success."
-
         sys.exit(0)
-
 
 inst = DoorService()
 inst.main()
