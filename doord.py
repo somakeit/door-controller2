@@ -84,7 +84,7 @@ class Tag:
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_a_key_b(self.str_x_uid()),
-                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields TODO, hanbdle any missing json fields
+                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields TODO, handle any missing json fields
 
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_b_key_b(self.str_x_uid()),
@@ -111,7 +111,6 @@ class Tag:
             print "Failed to authenticate, both sectors invalid"
             return False
 
-        print sector_a_ok and sector_b_ok and 1 < self.subtract(self.count_a, self.count_b) < 56635
         if sector_a_ok and sector_b_ok and 1 < self.subtract(self.count_a, self.count_b) < 65535: #subtract() wraps in 16-bit positive space, -1 is 65535
             #TESTME
             print "Warning: valid sector counts spaced higher than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
@@ -151,7 +150,7 @@ class Tag:
                 print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
                 return False
             if self.greater_than(self.count_b, self.count):
-                print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_b) + ", Continueing"
+                print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_b) + ", continuing"
 
             try:
                 self.write_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
@@ -229,7 +228,7 @@ class Tag:
 
     #write a sector to the tag given the count and secret
     def write_sector(self, sector, key, keyspec, secret, count):
-        generated_hash = bcrypt.hashpw(str(count) + str(secret), bcrypt.gensalt(self.BCRYPT_COST)) #TODO this function can't handle nul chars or unicode in secrets
+        generated_hash = bcrypt.hashpw(str(count) + str(secret), bcrypt.gensalt(self.BCRYPT_COST))
         hash_parts = generated_hash.split("$")
 
         data = []
@@ -341,7 +340,7 @@ class EntryDatabase:
         self.server_url = settings['server_url']
         self.api_key = settings['api_key']
 
-        # pull server copy down, if this initial load fails we will exit and let systemd respawn us, TODO: think about if we want to keep the cache on disk too
+        # pull server copy down, if this initial load fails we will exit and let systemd respawn us, TODO periodically update
         print "Connecting to " + self.server_url
         response = requests.get(self.server_url, cookies={'api_key': self.api_key})
         self.local = json.loads(response.text)
@@ -446,7 +445,7 @@ class EntryDatabase:
     def get_user_name(self, userid):
         return self.local['users'][userid]['name']
 
-#initialise a tag using well known sector keys
+#initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
 if len(sys.argv) > 1:
     if sys.argv[1] != "safe":
         print "python doord.py [init|safe|help]"
@@ -461,7 +460,10 @@ if len(sys.argv) > 1:
 
     nfc = MFRC522.MFRC522()
     db = EntryDatabase()
-    print "Initing tag with well known keys \"key a\" and \"key b\""
+    if sys.argv[1] == "init":
+        print "Initing tag with production keys"
+    else:
+        print "Initing tag with well known keys \"key a\" and \"key b\""
     print "Present tag.."
     status = nfc.MI_NOTAGERR
 
@@ -470,20 +472,36 @@ if len(sys.argv) > 1:
         (status,TagType) = nfc.MFRC522_Request(nfc.PICC_REQIDL)
     print "NFC device presented"
 	    
-    # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
     (status,uid) = nfc.MFRC522_Anticoll()
     if status == nfc.MI_OK:
         tag = Tag(uid, nfc, db)
 	print "Found tag UID: " + tag.str_x_uid()
 
-        sector_a_secret = os.urandom(23)
-        sector_b_secret = os.urandom(23)
+        # bcrypt will reject a count padded with a null (chr(0)) character.
+        # It will also reject unicode text objects (u"hello") but not unicode
+        # characters in a regular string (b"You can't have unicode in python comments")
+        while True:
+            sector_a_secret = os.urandom(23) #23 because this matches the entropy of the bcrypt digest itself
+            if not b"\x00" in sector_a_secret:
+                break
+        while True:
+            sector_b_secret = os.urandom(23)
+            if not b"\x00" in sector_a_secret:
+                break
         default_key = [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]
         default_keyspec = nfc.PICC_AUTHENT1A
-        sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
-        sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-        sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
-        sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
+        # Mifare keys may contain zeros
+        if sys.argv[1] == "init":
+            sector_a_key_a = map(ord, os.urandom(6))
+            sector_a_key_b = map(ord, os.urandom(6))
+            sector_b_key_a = map(ord, os.urandom(6))
+            sector_b_key_b = map(ord, os.urandom(6))
+        else:
+            #use well known keys for testing
+            sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
+            sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
+            sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
+            sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
 
         nfc.MFRC522_SelectTag(uid)
 
