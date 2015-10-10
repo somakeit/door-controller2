@@ -120,7 +120,7 @@ class Tag:
         
         if (not sector_b_ok) or (sector_a_ok and self.greater_than(self.count_a, self.count_b)):
             if self.less_than(self.count_a, self.count):
-                print "Duplicate card detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_a)
+                print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_a)
                 return False
             if self.greater_than(self.count_a, self.count):
                 print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_a) + ", continueing"
@@ -148,7 +148,7 @@ class Tag:
             self.db.commit()
         else:
             if self.less_than(self.count_b, self.count):
-                print "Duplicate card detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
+                print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
                 return False
             if self.greater_than(self.count_b, self.count):
                 print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_b) + ", Continueing"
@@ -546,7 +546,7 @@ if len(sys.argv) > 1:
             print "  key a: " + str(sector_b_key_a)
             print "  key b: " + str(sector_b_key_a)
             print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-            print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!" #TODO log out keys on failure, do not update db first, it could brick an existing card
+            print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!" #TODO log out keys on failure, do not update db first, it could brick an existing tag
             print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
             raise
 
