@@ -111,11 +111,12 @@ class Tag:
             print "Failed to authenticate, both sectors invalid"
             return False
 
-        if sector_a_ok and sector_b_ok and (abs(self.count_a - self.count_b) > 1):
+        print sector_a_ok and sector_b_ok and 1 < self.subtract(self.count_a, self.count_b) < 56635
+        if sector_a_ok and sector_b_ok and 1 < self.subtract(self.count_a, self.count_b) < 65535: #subtract() wraps in 16-bit positive space, -1 is 65535
             #TESTME
-            print "Warning: valid sector counts spaced higher than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
+            print "Warning: valid sector counts spaced higher than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
         if sector_a_ok and sector_b_ok and (self.count_a == self.count_b):
-            print "Warning: valid sector counts spaced lower than expected; A: " + str(self.count_a) + " B: " + str(self.count_b)
+            print "Warning: valid sector counts spaced lower than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
         
         if (not sector_b_ok) or (sector_a_ok and self.greater_than(self.count_a, self.count_b)):
             if self.less_than(self.count_a, self.count):
@@ -294,6 +295,9 @@ class Tag:
     #16-bit wrapping plus function
     def plus(self, left, right):
         return (left + right) % (2**16)
+
+    def subtract(self, left, right):
+        return (left - right) % (2**16)
 
     #16-bit wrapping greater than function
     def greater_than(self, left, right):
@@ -489,20 +493,20 @@ if len(sys.argv) > 1:
                              default_key,
                              default_keyspec,
                              sector_a_secret,
-                             (2**16)/2-10)#0)
+                             0)
             print "Writing sector 2"
             tag.write_sector(2,
                              default_key,
                              default_keyspec,
                              sector_b_secret,
-                             (2**16)/2-9)#1)
+                             1)
             print "Readback sectors"
             sector_a_backdata = tag.read_sector(1,
                                                 default_key,
                                                 default_keyspec)
             readback_a = tag.validate_sector(sector_a_backdata,
                                              sector_a_secret)
-            if readback_a != (2**16)/2-10:#0:
+            if readback_a != 0:
                 raise Exception("sector a (1) readback not correct.")
             
             sector_b_backdata = tag.read_sector(2,
@@ -510,7 +514,7 @@ if len(sys.argv) > 1:
                                                 default_keyspec)
             readback_b = tag.validate_sector(sector_b_backdata,
                                              sector_b_secret)
-            if readback_b != (2**16)/2-9:#1:
+            if readback_b != 1:
                 raise  Exception("sector b (2) readback not correct.")
 
             print "Securing sectors"
@@ -523,7 +527,7 @@ if len(sys.argv) > 1:
                                                 default_keyspec)
             readback_a = tag.validate_sector(sector_a_backdata,
                                              sector_a_secret)
-            if readback_a != (2**16)/2-10:#0:
+            if readback_a != 0:
                 raise Exception("sector a (1) readback not correct.")
         
             sector_b_backdata = tag.read_sector(2,
@@ -531,7 +535,7 @@ if len(sys.argv) > 1:
                                                 default_keyspec)
             readback_b = tag.validate_sector(sector_b_backdata,
                                              sector_b_secret)
-            if readback_b != (2**16)/2-9:#1:
+            if readback_b != 1:
                 raise Exception("sector b (2) readback not correct.")
 
         except Exception as e:
