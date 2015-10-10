@@ -1,6 +1,6 @@
-import sys, os, json, requests, base64
+import sys, os, syslog, json, base64
 from math import ceil
-import crc16, bcrypt
+import crc16, bcrypt, requests
 sys.path.append("MFRC522-python")
 import MFRC522
 
@@ -559,13 +559,15 @@ if len(sys.argv) > 1:
         except Exception as e:
             print "sector a (1):"
             print "  key a: " + str(sector_a_key_a)
-            print "  key b: " + str(sector_a_key_a)
+            print "  key b: " + str(sector_a_key_b)
             print "sector b (2):"
             print "  key a: " + str(sector_b_key_a)
-            print "  key b: " + str(sector_b_key_a)
+            print "  key b: " + str(sector_b_key_b)
             print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-            print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!" #TODO log out keys on failure, do not update db first, it could brick an existing tag
+            print "FAILED TO WRITE TAG - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!"
             print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            #make doubly sure this gets logged
+            syslog.syslog("doord: Failed to init a tag, keys attempted were: sector a (1): key a: " + str(sector_a_key_a) + " key b: " + str(sector_a_key_b) + " sector b (2): key a: " + str(sector_b_key_a) + "  key b: " + str(sector_b_key_b))
             raise
 
         print "Sending tag details to server."
