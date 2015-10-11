@@ -7,6 +7,8 @@ import MFRC522
 class DoorService:
     nfc = None
     db = None
+    DEBOUNCE = 5 #seconds
+    recent_tags = {}
 
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
@@ -24,12 +26,16 @@ class DoorService:
 	        (status,uid) = self.nfc.MFRC522_Anticoll()
                 if status == self.nfc.MI_OK:
 	            tag = Tag(uid, self.nfc, self.db)
+                    if self.recent_tags.has_key(tag.str_x_uid()):
+                        if self.recent_tags[tag.str_x_uid()] + self.DEBOUNCE > time.time():
+                            del tag
+                            continue #ignore a tag for DEBOUNE seconds after sucessful auth
 	            print "Found tag UID: " + tag.str_x_uid()
-                    #TODO tag de-bounce
 
 		    #authenticate
 		    if tag.authenticate():
 		        print "Tag " + tag.str_x_uid() + " authenticated"
+                        self.recent_tags[tag.str_x_uid()] = time.time()
 		        #TODO open the door
 		    else:
 		        print "Tag " + tag.str_x_uid() + " NOT authenticated"
