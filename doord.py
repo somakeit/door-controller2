@@ -1,4 +1,4 @@
-import sys, os, syslog, json, base64
+import sys, os, syslog, json, base64, time
 from math import ceil
 import crc16, bcrypt, requests
 sys.path.append("MFRC522-python")
@@ -15,31 +15,29 @@ class DoorService:
 
     def main(self):
         while True:
-            status = self.nfc.MI_NOTAGERR
+            (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL) #searches for a card for up to approxamately 100ms
 
-	    # wait for an nfc device to be presented
-	    while status != self.nfc.MI_OK:
-                #TODO a polling rate to reduce CPU use and tag de-bounce
-	        (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
-	    print "NFC device presented"
+	    # is a device presented
+	    if status == self.nfc.MI_OK:
 	    
-	    # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
-	    (status,uid) = self.nfc.MFRC522_Anticoll()
-            if status == self.nfc.MI_OK:
-	        tag = Tag(uid, self.nfc, self.db)
-	        print "Found tag UID: " + tag.str_x_uid()
+	        # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
+	        (status,uid) = self.nfc.MFRC522_Anticoll()
+                if status == self.nfc.MI_OK:
+	            tag = Tag(uid, self.nfc, self.db)
+	            print "Found tag UID: " + tag.str_x_uid()
+                    #TODO tag de-bounce
 
-		#authenticate
-		if tag.authenticate():
-		    print "Tag " + tag.str_x_uid() + " authenticated"
-		    #TODO open the door
-		else:
-		    print "Tag " + tag.str_x_uid() + " NOT authenticated"
+		    #authenticate
+		    if tag.authenticate():
+		        print "Tag " + tag.str_x_uid() + " authenticated"
+		        #TODO open the door
+		    else:
+		        print "Tag " + tag.str_x_uid() + " NOT authenticated"
 
-                del tag
+                    del tag
 
-	    else:
-	        print "Failed to read UID"
+	        else:
+	            print "Failed to read UID"
 
 class Tag:
     uid = None
