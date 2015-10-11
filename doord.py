@@ -87,18 +87,28 @@ class Tag:
                 print "Tag " + self.str_x_uid() + " is alien"
             elif str(e) == "Unassigned tag":
                 print "Tag " + self.str_x_uid() + " is not assigned to anyone"
+            else:
+                print "Database error, could not load user id for tag: " + str(e)
             return False
 
-        username = self.db.get_user_name(userid)
+        try:
+            username = self.db.get_user_name(userid)
+        except EntryDatabaseException as e:
+            print "Database error, could not load user name: " + str(e)
+            return False
         print "Tag is assigned to user " + userid + " (" + username + ")"
         
-        self.count = self.db.get_tag_count(self.str_x_uid())
+        try:
+            self.count = self.db.get_tag_count(self.str_x_uid())
+        except EntryDatabaseException as e:
+            print "Database error, could not load tag count: " + str(e)
+            return False
 
 
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_a_key_b(self.str_x_uid()),
-                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields TODO, handle any missing json fields
+                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields
 
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
                                              self.db.get_tag_sector_b_key_b(self.str_x_uid()),
@@ -107,19 +117,28 @@ class Tag:
             #TESTME one and both
             print "Failed to Read sector: " + str(e)
             return False
-        
+        except EntryDatabaseException as e:
+            print "Database error: " + str(e)
+            return False
+
         try:
             self.count_a = self.validate_sector(sector_a_data,
                                                 self.db.get_tag_sector_a_secret(self.str_x_uid()))
         except TagException as e:
             print "Failed to validate sector a: " + str(e)
             sector_a_ok = False
+        except EntryDatabaseException as e:
+            print "Database error: " + str(e)
+            return False
         try:
             self.count_b = self.validate_sector(sector_b_data,
                                                 self.db.get_tag_sector_b_secret(self.str_x_uid()))
         except TagException as e:
             print "Failed to validate sector b: " + str(e)
             sector_b_ok = False
+        except EntryDatabaseException as e:
+            print "Database error: " + str(e)
+            return False
 
         if (sector_a_ok == False) and (sector_b_ok == False):
             print "Failed to authenticate, both sectors invalid"
@@ -151,6 +170,9 @@ class Tag:
             except TagException as e:
                 print "Failed to update tag: " + str(e)
                 return False
+            except EntryDatabaseException as e:
+                print "Database error: " + str(e)
+                return False
 
             if readback != (self.plus(self.count_a, 1)):
                 #TESTME, maybe, it's hard
@@ -180,6 +202,9 @@ class Tag:
             except TagException as e:
                 print "Failed to update tag: " + str(e)
                 return False
+            except EntryDatabaseException as e:
+                print "Database error: " + str(e)
+                return False
 
             if readback != (self.plus(self.count_b, 1)):
                 #TESTME, maybe, it's hard
@@ -208,7 +233,7 @@ class Tag:
         
         if algorithm > (len(self.BCRYPT_VERSION) - 1):
             #TESTME
-            raise TagException("Unknown bcrypt algorithm")
+            raise TagException("Unknown bcrypt algorithm: " + str(algorithm))
         
         for b in reserved:
             if b != 0:
@@ -221,7 +246,7 @@ class Tag:
 
         if calculated_hash != read_hash:
             #TESTME
-            raise TagException("Hash does not match, count is not authentic.") #TODO is there enough logging to fully diagnose a cloned tag #TESTME clone tag
+            raise TagException("Hash does not match, count is not authentic.") #TESTME clone tag and make tag with bad signature
 
         return count
 
@@ -356,28 +381,34 @@ class EntryDatabase:
         response = requests.get(self.server_url, cookies={'api_key': self.api_key})
         self.local = json.loads(response.text)
 
-        if not self.local.has_key("users"):
-            self.local["users"] = {}
-        if not self.local.has_key("tags"):
-            self.local["tags"] = {}
-
     def commit(self):
         if len(self.unsent) < 1:
-            raise Exception("Nothing to send.")
+            raise EntryDatabaseException("Nothing to send.")
         response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(self.unsent))
         if 200 < response.status_code <= 300:
-            raise Exception("Request returned bad status: " + str(response.status_code)) #TODO some sort of re-try for no net connection & no server
+            raise EntryDatabaseException("Request returned bad status: " + str(response.status_code)) #TODO some sort of re-try for no net connection & no server
 
     def get_tag_user(self, uid):
-        if not self.local['tags'].has_key(uid):
-            raise Exception("Unkown tag")
-        if not self.local["tags"][uid].has_key('assigned_user'):
-            raise Exception("Unassigned tag")
-        return self.local['tags'][uid]['assigned_user']
+        try:
+            if not self.local['tags'].has_key(uid):
+                raise EntryDatabseException("Unkown tag")
+            if not self.local["tags"][uid].has_key('assigned_user'):
+                raise EntryDatabaseException("Unassigned tag")
+            if type(self.local['tags'][uid]['assigned_user']) in [str,unicode]:
+                return self.local['tags'][uid]['assigned_user']
+            else:
+                raise EntryDatabaseException("Assigned user id not string: " + str(self.local['tags'][uid]['assigned_user']))
+        except TypeError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
-    #getters to keep the "database" schema out of the auth code
     def get_tag_count(self, uid):
-        return self.local['tags'][uid]['count']
+        try:
+            if type(self.local['tags'][uid]['count']) is int:
+                return self.local['tags'][uid]['count']
+            else:
+                raise EntryDatabaseException("count not an int: " + str(self.local['tags'][uid]['count'])) #TESTME counts >65535 and <0
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def vivify(self, dic, keys, value):
         key = keys.pop(0)
@@ -398,63 +429,136 @@ class EntryDatabase:
         self.vivify(self.unsent, ['tags',uid,'count'],  count)
 
     def get_tag_sector_a_sector(self, uid):
-        return self.local['tags'][uid]['sector_a_sector']
+        try:
+            if type(self.local['tags'][uid]['sector_a_sector']) is int:
+                return self.local['tags'][uid]['sector_a_sector']
+            else:
+                raise EntryDatabaseException("sector_a_sector not an int: " + str(self.local['tags'][uid]['sector_a_sector']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_a_sector(self, uid, sector):
         self.vivify(self.local, ['tags',uid,'sector_a_sector'], sector)
         self.vivify(self.unsent, ['tags',uid,'sector_a_sector'], sector)
 
     def get_tag_sector_b_sector(self, uid):
-        return self.local['tags'][uid]['sector_b_sector']
+        try:
+            if type(self.local['tags'][uid]['sector_b_sector']) is int:
+                return self.local['tags'][uid]['sector_b_sector']
+            else:
+                raise EntryDatabaseException("sector_b_sector not an int: " + str(self.local['tags'][uid]['sector_b_sector']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_b_sector(self, uid, sector):
         self.vivify(self.local, ['tags',uid,'sector_b_sector'], sector)
         self.vivify(self.unsent, ['tags',uid,'sector_b_sector'], sector)
 
     def get_tag_sector_a_key_a(self, uid):
-        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_a']))
+        try:
+            if type(self.local['tags'][uid]['sector_a_key_a']) in [str,unicode]:
+                key = map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_a']))
+                if len(key) == 6:
+                    return key
+                else:
+                    raise EntryDatabaseException("sector_a_key_a is incorrect length: " + str(key))
+            else:
+                raise EntryDatabaseException("sector_a_key_a not a string: " + str(self.local['tags'][uid]['sector_a_key_a']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_a_key_a(self, uid, key):
         self.vivify(self.local, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
         self.vivify(self.unsent, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_a_key_b(self, uid):
-        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_b']))
+        try:
+            if type(self.local['tags'][uid]['sector_a_key_b']) in [str,unicode]:
+                key = map(ord, base64.b64decode(self.local['tags'][uid]['sector_a_key_b']))
+                if len(key) == 6:
+                    return key
+                else:
+                    raise EntryDatabaseException("sector_a_key_b is incorrect length: " + str(key))
+            else:
+                raise EntryDatabaseException("sector_a_key_b not a string: " + str(self.local['tags'][uid]['sector_a_key_b']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_a_key_b(self, uid, key):
         self.vivify(self.local, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
         self.vivify(self.unsent, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_b_key_a(self, uid):
-        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_a']))
+        try:
+            if type(self.local['tags'][uid]['sector_b_key_a']) in [str,unicode]:
+                key = map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_a']))
+                if len(key) == 6:
+                    return key
+                else:
+                    raise EntryDatabaseException("sector_b_key_a is incorrect length: " + str(key))
+            else:
+                raise EntryDatabaseException("sector_b_key_a not a string: " + str(self.local['tags'][uid]['sector_b_key_a']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_b_key_a(self, uid, key):
         self.vivify(self.local, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
         self.vivify(self.unsent, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_b_key_b(self, uid):
-        return map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_b']))
+        try:
+            if type(self.local['tags'][uid]['sector_b_key_b']) in [str,unicode]:
+                key = map(ord, base64.b64decode(self.local['tags'][uid]['sector_b_key_b']))
+                if len(key) == 6:
+                    return key
+                else:
+                    raise EntryDatabaseException("sector_b_key_b is incorrect length: " + str(key))
+            else:
+                raise EntryDatabaseException("sector_b_key_b not a string: " + str(self.local['tags'][uid]['sector_b_key_b']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_b_key_b(self, uid, key):
         self.vivify(self.local, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
         self.vivify(self.unsent, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
     
     def get_tag_sector_a_secret(self, uid):
-        return base64.b64decode(self.local['tags'][uid]['sector_a_secret'])
+        try:
+            if type(self.local['tags'][uid]['sector_a_secret']) in [str,unicode]:
+                return base64.b64decode(self.local['tags'][uid]['sector_a_secret'])
+            else:
+                raise EntryDatabaseException("sector_a_secret is not string: " + str(self.local['tags'][uid]['sector_a_secret']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
     
     def set_tag_sector_a_secret(self, uid, secret):
         self.vivify(self.local, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
         self.vivify(self.unsent, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
 
     def get_tag_sector_b_secret(self, uid):
-        return base64.b64decode(self.local['tags'][uid]['sector_b_secret'])
+        try:
+            if type(self.local['tags'][uid]['sector_b_secret']) in [str,unicode]:
+                return base64.b64decode(self.local['tags'][uid]['sector_b_secret'])
+            else:
+                raise EntryDatabaseException("sector_b_secret is not string: " + str(self.local['tags'][uid]['sector_b_secret']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
     
     def set_tag_sector_b_secret(self, uid, secret):
         self.vivify(self.local, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
         self.vivify(self.unsent, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
 
     def get_user_name(self, userid):
-        return self.local['users'][userid]['name']
+        try:
+            if type(self.local['users'][userid]['name']) in [str,unicode]:
+                return self.local['users'][userid]['name']
+            else:
+                raise EntryDatabaseException("User name is not a string: " + str(self.local['users'][userid]['name']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
+
+class EntryDatabaseException(Exception):
+    pass
 
 #initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
 if len(sys.argv) > 1:
