@@ -63,6 +63,17 @@ class Tag:
 	self.nfc = nfc
         self.db = db
 
+        self.select()
+
+    def select(self):
+        self.nfc.MFRC522_SelectTag(self.uid)
+
+    def unselect(self):
+        self.nfc.MFRC522_StopCrypto1()
+
+    def __del__(self):
+        self.unselect()
+
     #attempt the whole authentication process with this tag
     def authenticate(self):
         sector_a_ok = True
@@ -83,7 +94,6 @@ class Tag:
         
         self.count = self.db.get_tag_count(self.str_x_uid())
 
-        self.nfc.MFRC522_SelectTag(self.uid) #TODO handle errors, decide where to do this
 
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
@@ -318,9 +328,6 @@ class Tag:
             return True
         return left < right
 
-    def __del__(self):
-        self.nfc.MFRC522_StopCrypto1()
-
 class TagException(Exception):
     pass
 
@@ -490,7 +497,7 @@ if len(sys.argv) > 1:
                 break
         while True:
             sector_b_secret = os.urandom(23)
-            if not b"\x00" in sector_a_secret:
+            if not b"\x00" in sector_b_secret:
                 break
         default_key = [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]
         default_keyspec = nfc.PICC_AUTHENT1A
@@ -506,8 +513,6 @@ if len(sys.argv) > 1:
             sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
             sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
             sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-
-        nfc.MFRC522_SelectTag(uid)
 
         try:
             print "Writing sector 1"
