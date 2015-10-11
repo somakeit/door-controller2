@@ -54,7 +54,7 @@ class Tag:
     count_b = None
     BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
-    BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed (TODO that)
+    BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed
     SECTOR_LOCK_BYTES = [0x7F,0x07,0x88,0x69] #key a r/w, key b r/w/conf
 
     #create tag object representing one session with one tag
