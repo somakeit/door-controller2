@@ -1,5 +1,6 @@
 import sys, os, syslog, json, base64, time
 from math import ceil
+from multiprocessing import Process, Manager
 import crc16, bcrypt, requests
 sys.path.append("MFRC522-python")
 import MFRC522
@@ -9,6 +10,8 @@ class DoorService:
     db = None
     DEBOUNCE = 5 #seconds
     recent_tags = {}
+    SERVER_POLL = 300 #seconds
+    last_server_poll = time.time() #EntryDatabase will force a blocking poll when instantiated
 
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
@@ -29,7 +32,7 @@ class DoorService:
                     if self.recent_tags.has_key(tag.str_x_uid()):
                         if self.recent_tags[tag.str_x_uid()] + self.DEBOUNCE > time.time():
                             del tag
-                            continue #ignore a tag for DEBOUNE seconds after sucessful auth
+                            continue #ignore a tag for DEBOUNCE seconds after sucessful auth
 	            print "Found tag UID: " + tag.str_x_uid()
 
 		    #authenticate
@@ -44,6 +47,10 @@ class DoorService:
 
 	        else:
 	            print "Failed to read UID"
+
+            if time.time() > self.last_server_poll + self.SERVER_POLL:
+                self.db.server_poll()
+                self.last_server_poll = time.time()
 
 class Tag:
     uid = None
@@ -180,7 +187,7 @@ class Tag:
                 return False
 
             self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_a, 1)) #NEVER sucessfully authenticate without updating the count
-            self.db.commit()
+            self.db.server_poll()
         else:
             if self.less_than(self.count_b, self.count):
                 print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
@@ -212,7 +219,7 @@ class Tag:
                 return False
 
             self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
-            self.db.commit()
+            self.db.server_poll()
         
         return True
 
@@ -357,8 +364,10 @@ class TagException(Exception):
     pass
 
 class EntryDatabase:
-    local = {}
-    unsent = {}
+    proc = None
+    mgr = Manager()
+    local = mgr.dict() #shared objects
+    unsent = mgr.dict()
     server_url = None
     api_key = None
 
@@ -376,22 +385,71 @@ class EntryDatabase:
         self.server_url = settings['server_url']
         self.api_key = settings['api_key']
 
-        # pull server copy down, if this initial load fails we will exit and let systemd respawn us, TODO periodically update
+        # pull server copy down, if this initial load fails we will exit and let systemd respawn us
         print "Connecting to " + self.server_url
-        response = requests.get(self.server_url, cookies={'api_key': self.api_key})
-        self.local = json.loads(response.text)
+        self.server_pull_now()
 
-    def commit(self):
-        if len(self.unsent) < 1:
-            raise EntryDatabaseException("Nothing to send.")
-        response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(self.unsent))
-        if 200 < response.status_code <= 300:
-            raise EntryDatabaseException("Request returned bad status: " + str(response.status_code)) #TODO some sort of re-try for no net connection & no server
+    def __del__(self):
+        if type(self.proc) is Process and self.proc.is_alive():
+            self.proc.terminate()
+
+    #blocking pull of db from server
+    def server_pull_now(self):
+        try:
+            response = requests.get(self.server_url, cookies={'api_key': self.api_key})
+            if 200 <= response.status_code < 300:
+                self.local.update(json.loads(response.text))
+            else:
+                raise EntryDatabaseException("Server returned bad status to GET: " + str(response.status_code))
+        except requests.exceptions.RequestException as e:
+            raise EntryDatabaseException("GET request error: " + str(e))
+
+    #blocking update of server
+    def server_push_now(self):
+        try:
+            response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(dict(self.unsent)))
+            if 200 <= response.status_code < 300:
+                self.unsent.clear()
+            else:
+                raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code))
+        except requests.exceptions.RequestException as e:
+            raise EntryDatabaseException("POST request error: " + str(e))
+
+    def _server_poll_worker(self, r_unsent, r_local):
+        if len(r_unsent) > 0:
+            try:
+                response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(dict(r_unsent)))
+                if 200 <= response.status_code < 300:
+                    r_unsent.clear()
+                else:
+                    #there is nobody to catch anything thrown here
+                    print "Server returned bad status to POST:" + str(response.status_code)
+                    return #do not pull if we failed to push, it may clobber unsent from local
+            except requests.exceptions.RequestException as e:
+                print "POST request error: " + str(e)
+                return
+
+        try:
+            response = requests.get(self.server_url, cookies={'api_key': self.api_key})
+            if 200 <= response.status_code < 300:
+                r_local = json.loads(response.text)
+            else:
+                print "Server returned bad status to GET: " + str(response.status_code)
+        except requests.exceptions.RequestException as e:
+            print "GET request error: " + str(e)
+
+    #attempt to send unsent changes to the server and update the local copy, asynchronously
+    def server_poll(self):
+        if type(self.proc) is Process and self.proc.is_alive():
+            print "Server poll still in progress, not starting another."
+        else:
+            self.proc = Process(target = self._server_poll_worker, args = (self.unsent, self.local))
+            self.proc.start()
 
     def get_tag_user(self, uid):
         try:
             if not self.local['tags'].has_key(uid):
-                raise EntryDatabseException("Unkown tag")
+                raise EntryDatabaseException("Unkown tag")
             if not self.local["tags"][uid].has_key('assigned_user'):
                 raise EntryDatabaseException("Unassigned tag")
             if type(self.local['tags'][uid]['assigned_user']) in [str,unicode]:
@@ -416,7 +474,7 @@ class EntryDatabase:
             if len(keys) < 1:
                 dic[key] = value
             else:
-                dic[key] = {}
+                dic.update({key: {}})
                 self.vivify(dic[key], keys, value)
         else:
             if len(keys) < 1:
@@ -425,8 +483,12 @@ class EntryDatabase:
                 self.vivify(dic[key], keys, value)
       
     def set_tag_count(self, uid, count):
-        self.vivify(self.local, ['tags',uid,'count'], count)
-        self.vivify(self.unsent, ['tags',uid,'count'],  count)
+        p_local = dict(self.local) #copy and cast the shared object to a real dict before vivifying it
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'count'], count)
+        self.vivify(p_unsent, ['tags',uid,'count'],  count)
+        self.local.update(p_local) #update after to set the shared object to the content of the dict
+        self.unsent.update(p_unsent)
 
     def get_tag_sector_a_sector(self, uid):
         try:
@@ -438,8 +500,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_a_sector(self, uid, sector):
-        self.vivify(self.local, ['tags',uid,'sector_a_sector'], sector)
-        self.vivify(self.unsent, ['tags',uid,'sector_a_sector'], sector)
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_a_sector'], sector)
+        self.vivify(p_unsent, ['tags',uid,'sector_a_sector'], sector)
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
 
     def get_tag_sector_b_sector(self, uid):
         try:
@@ -451,8 +517,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_b_sector(self, uid, sector):
-        self.vivify(self.local, ['tags',uid,'sector_b_sector'], sector)
-        self.vivify(self.unsent, ['tags',uid,'sector_b_sector'], sector)
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_b_sector'], sector)
+        self.vivify(p_unsent, ['tags',uid,'sector_b_sector'], sector)
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
 
     def get_tag_sector_a_key_a(self, uid):
         try:
@@ -468,8 +538,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_a_key_a(self, uid, key):
-        self.vivify(self.local, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
-        self.vivify(self.unsent, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(p_unsent, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
     
     def get_tag_sector_a_key_b(self, uid):
         try:
@@ -485,8 +559,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_a_key_b(self, uid, key):
-        self.vivify(self.local, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
-        self.vivify(self.unsent, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(p_unsent, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
     
     def get_tag_sector_b_key_a(self, uid):
         try:
@@ -502,8 +580,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_b_key_a(self, uid, key):
-        self.vivify(self.local, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
-        self.vivify(self.unsent, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(p_unsent, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
     
     def get_tag_sector_b_key_b(self, uid):
         try:
@@ -519,8 +601,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
 
     def set_tag_sector_b_key_b(self, uid, key):
-        self.vivify(self.local, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
-        self.vivify(self.unsent, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
+        self.vivify(p_unsent, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
     
     def get_tag_sector_a_secret(self, uid):
         try:
@@ -532,8 +618,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
     
     def set_tag_sector_a_secret(self, uid, secret):
-        self.vivify(self.local, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
-        self.vivify(self.unsent, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
+        self.vivify(p_unsent, ['tags',uid,'sector_a_secret'], base64.b64encode(secret))
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
 
     def get_tag_sector_b_secret(self, uid):
         try:
@@ -545,8 +635,12 @@ class EntryDatabase:
             raise EntryDatabaseException("TypeError: " + str(e))
     
     def set_tag_sector_b_secret(self, uid, secret):
-        self.vivify(self.local, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
-        self.vivify(self.unsent, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
+        p_local = dict(self.local)
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
+        self.vivify(p_unsent, ['tags',uid,'sector_b_secret'], base64.b64encode(secret))
+        self.local.update(p_local)
+        self.unsent.update(p_unsent)
 
     def get_user_name(self, userid):
         try:
@@ -679,7 +773,10 @@ if len(sys.argv) > 1:
             db.set_tag_sector_a_key_b(tag.str_x_uid(), sector_a_key_b)
             db.set_tag_sector_b_key_a(tag.str_x_uid(), sector_b_key_a)
             db.set_tag_sector_b_key_b(tag.str_x_uid(), sector_b_key_b)
-            db.commit()
+            try:
+                db.server_push_now()
+            except EntryDatabaseError as e:
+                raise
             print "Success."
 
         except Exception as e:

@@ -1,0 +1,36 @@
+{
+    "tags": {
+        "35a53b6": {
+            "assigned_user": "00003",
+            "count": 3,
+            "sector_a_key_a": "a2V5IGEA",
+            "sector_a_key_b": "a2V5IGIA",
+            "sector_a_secret": "hoteEaISPm56KrcIX67fMWRWEm3GmZU=",
+            "sector_a_sector": 1,
+            "sector_b_key_a": "a2V5IGEA",
+            "sector_b_key_b": "a2V5IGIA",
+            "sector_b_secret": "fp6C+KijosMbvxMF9vo3cNS2c98oSGY=",
+            "sector_b_sector": 2
+        },
+        "9b8785b5": {
+            "assigned_user": "00000",
+            "count": 4240,
+            "sector_a_key_a": "a2V5IGEA",
+            "sector_a_key_b": "a2V5IGIA",
+            "sector_a_secret": "Kv8i+jYXSxcz9bhB2CfD6eCvDaR28kI=",
+            "sector_a_sector": 1,
+            "sector_b_key_a": "a2V5IGEA",
+            "sector_b_key_b": "a2V5IGIA",
+            "sector_b_secret": "46vd6xKo6++lKxe60kCas/wNk9zZSjM=",
+            "sector_b_sector": 2
+        }
+    },
+    "users": {
+        "00000": {
+            "name": "Bob"
+        },
+        "00003": {
+            "name": "Bracken Dawson"
+        }
+    }
+}

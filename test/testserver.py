@@ -26,6 +26,8 @@ def update_dict(dicta, dictb):
 class MyWankyHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     def send_head(self):
         global data
+        if self.headers.has_key('Cookie'):
+            print self.headers['Cookie']
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         retdata = json.dumps(data)
