@@ -12,11 +12,23 @@ class DoorService:
     recent_tags = {}
     SERVER_POLL = 300 #seconds
     last_server_poll = time.time() #EntryDatabase will force a blocking poll when instantiated
+    DOOR_IO = 7 #pi numbering
+    DOOR_OPEN_TIME = 5 #seconds
+    door_opened = 0;
 
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
         self.db = EntryDatabase()
+
+        self.set_pi_pin_mode(self.DOOR_IO, 'out')
+        self.write_pi_pin(self.DOOR_IO, 0)
+
         print "Initialised"
+
+    def __del__(self):
+        self.release_pi_pin(self.DOOR_IO)
+        del self.nfc
+        del self.db
 
     def main(self):
         while True:
@@ -39,7 +51,9 @@ class DoorService:
 		    if tag.authenticate():
 		        print "Tag " + tag.str_x_uid() + " authenticated"
                         self.recent_tags[tag.str_x_uid()] = time.time()
-		        #TODO open the door
+                        #open the door
+                        self.door_opened = time.time()
+		        self.write_pi_pin(self.DOOR_IO, 1)
 		    else:
 		        print "Tag " + tag.str_x_uid() + " NOT authenticated"
 
@@ -48,9 +62,45 @@ class DoorService:
 	        else:
 	            print "Failed to read UID"
 
+            if self.door_opened > 0 and time.time() > self.door_opened + self.DOOR_OPEN_TIME:
+                #close the door
+                self.write_pi_pin(self.DOOR_IO, 0)
+                self.door_opened = 0
+
             if time.time() > self.last_server_poll + self.SERVER_POLL:
                 self.db.server_poll()
                 self.last_server_poll = time.time()
+
+    def set_pi_pin_mode(self, pin, mode):
+        fexp = open('/sys/class/gpio/export', 'w')
+        fexp.write(str(pin))
+        try:
+            fexp.close()
+        except IOError:
+            del fexp
+        attempts = 0
+        while True:
+            try:
+                fdir = open('/sys/class/gpio/gpio' + str(pin) + '/direction', 'w')
+                fdir.write(mode)
+                fdir.close()
+                break
+            except IOError:
+                if attempts > 10:
+                    raise
+
+    def release_pi_pin(self, pin):
+        fexp = open('/sys/class/gpio/unexport', 'w')
+        fexp.write(str(pin))
+        try:
+            fexp.close()
+        except IOError:
+            del fexp
+
+    def write_pi_pin(self, pin, val):
+        fval = open('/sys/class/gpio/gpio' + str(pin) + '/value', 'w')
+        fval.write(str(val))
+        fval.close()
 
 class Tag:
     uid = None
@@ -88,7 +138,7 @@ class Tag:
 
         try:
             userid = self.db.get_tag_user(self.str_x_uid())
-        except Exception as e:
+        except EntryDatabaseException as e:
             #TESTME
             if str(e) == "Unkown tag":
                 print "Tag " + self.str_x_uid() + " is alien"
@@ -448,7 +498,7 @@ class EntryDatabase:
 
     def get_tag_user(self, uid):
         try:
-            if not self.local['tags'].has_key(uid):
+            if not self.local.has_key("tags") or not self.local['tags'].has_key(uid):
                 raise EntryDatabaseException("Unkown tag")
             if not self.local["tags"][uid].has_key('assigned_user'):
                 raise EntryDatabaseException("Unassigned tag")
