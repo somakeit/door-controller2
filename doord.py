@@ -80,6 +80,7 @@ class DoorService:
             del fexp
         attempts = 0
         while True:
+            attempts += 1
             try:
                 fdir = open('/sys/class/gpio/gpio' + str(pin) + '/direction', 'w')
                 fdir.write(mode)
