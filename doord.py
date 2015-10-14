@@ -1,4 +1,4 @@
-import sys, os, syslog, json, base64, time
+import sys, os, syslog, json, base64
 from math import ceil
 from multiprocessing import Process, Manager
 import crc16, bcrypt, requests
@@ -11,7 +11,7 @@ class DoorService:
     DEBOUNCE = 5 #seconds
     recent_tags = {}
     SERVER_POLL = 300 #seconds
-    last_server_poll = time.time() #EntryDatabase will force a blocking poll when instantiated
+    last_server_poll = os.times()[4] #EntryDatabase will force a blocking poll when instantiated
     DOOR_IO = 7 #pi numbering
     DOOR_OPEN_TIME = 5 #seconds
     door_opened = 0;
@@ -42,7 +42,7 @@ class DoorService:
                 if status == self.nfc.MI_OK:
 	            tag = Tag(uid, self.nfc, self.db)
                     if self.recent_tags.has_key(tag.str_x_uid()):
-                        if self.recent_tags[tag.str_x_uid()] + self.DEBOUNCE > time.time():
+                        if self.recent_tags[tag.str_x_uid()] + self.DEBOUNCE > os.times()[4]:
                             del tag
                             continue #ignore a tag for DEBOUNCE seconds after sucessful auth
 	            print "Found tag UID: " + tag.str_x_uid()
@@ -50,9 +50,9 @@ class DoorService:
 		    #authenticate
 		    if tag.authenticate():
 		        print "Tag " + tag.str_x_uid() + " authenticated"
-                        self.recent_tags[tag.str_x_uid()] = time.time()
+                        self.recent_tags[tag.str_x_uid()] = os.times()[4]
                         #open the door
-                        self.door_opened = time.time()
+                        self.door_opened = os.times()[4]
 		        self.write_pi_pin(self.DOOR_IO, 1)
 		    else:
 		        print "Tag " + tag.str_x_uid() + " NOT authenticated"
@@ -62,14 +62,14 @@ class DoorService:
 	        else:
 	            print "Failed to read UID"
 
-            if self.door_opened > 0 and time.time() > self.door_opened + self.DOOR_OPEN_TIME:
+            if self.door_opened > 0 and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
                 #close the door
                 self.write_pi_pin(self.DOOR_IO, 0)
                 self.door_opened = 0
 
-            if time.time() > self.last_server_poll + self.SERVER_POLL:
+            if os.times()[4] > self.last_server_poll + self.SERVER_POLL:
                 self.db.server_poll()
-                self.last_server_poll = time.time()
+                self.last_server_poll = os.times()[4]
 
     def set_pi_pin_mode(self, pin, mode):
         fexp = open('/sys/class/gpio/export', 'w')
