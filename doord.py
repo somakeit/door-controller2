@@ -1,4 +1,4 @@
-import sys, os, syslog, json, base64
+import sys, os, syslog, json, base64, time
 from math import ceil
 from multiprocessing import Process, Manager
 import crc16, bcrypt, requests
@@ -89,6 +89,7 @@ class DoorService:
             except IOError:
                 if attempts > 10:
                     raise
+		time.sleep(0.1)
 
     def release_pi_pin(self, pin):
         fexp = open('/sys/class/gpio/unexport', 'w')
