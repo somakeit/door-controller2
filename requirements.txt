@@ -1,3 +1,4 @@
 crc16
 bcrypt
 requests
+spidev
