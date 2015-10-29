@@ -502,7 +502,7 @@ class EntryDatabase:
         try:
             if not self.local.has_key("tags") or not self.local['tags'].has_key(uid):
                 raise EntryDatabaseException("Unkown tag")
-            if not self.local["tags"][uid].has_key('assigned_user'):
+            if not self.local["tags"][uid].has_key('assigned_user') or self.local["tags"][uid]["assigned_user"] is None:
                 raise EntryDatabaseException("Unassigned tag")
             if type(self.local['tags'][uid]['assigned_user']) in [str,unicode]:
                 return self.local['tags'][uid]['assigned_user']
@@ -510,6 +510,14 @@ class EntryDatabase:
                 raise EntryDatabaseException("Assigned user id not string: " + str(self.local['tags'][uid]['assigned_user']))
         except TypeError as e:
             raise EntryDatabaseException("TypeError: " + str(e))
+
+    def set_tag_user(self, uid, user):
+        p_local = dict(self.local) #copy and cast the shared object to a real dict before vivifying it
+        p_unsent = dict(self.unsent)
+        self.vivify(p_local, ['tags',uid,'assigned_user'], user)
+        self.vivify(p_unsent, ['tags',uid,'assigned_user'], user)
+        self.local.update(p_local) #update after to set the shared object to the content of the dict
+        self.unsent.update(p_unsent)
 
     def get_tag_count(self, uid):
         try:
@@ -535,11 +543,11 @@ class EntryDatabase:
                 self.vivify(dic[key], keys, value)
       
     def set_tag_count(self, uid, count):
-        p_local = dict(self.local) #copy and cast the shared object to a real dict before vivifying it
+        p_local = dict(self.local)
         p_unsent = dict(self.unsent)
         self.vivify(p_local, ['tags',uid,'count'], count)
         self.vivify(p_unsent, ['tags',uid,'count'],  count)
-        self.local.update(p_local) #update after to set the shared object to the content of the dict
+        self.local.update(p_local)
         self.unsent.update(p_unsent)
 
     def get_tag_sector_a_sector(self, uid):
@@ -816,6 +824,7 @@ if len(sys.argv) > 1:
                 raise Exception("sector b (2) readback not correct.")
 
             print "Sending tag details to server."
+            db.set_tag_user(tag.str_x_uid(), None)
             db.set_tag_count(tag.str_x_uid(), 1)
             db.set_tag_sector_a_sector(tag.str_x_uid(), 1)
             db.set_tag_sector_b_sector(tag.str_x_uid(), 2)
