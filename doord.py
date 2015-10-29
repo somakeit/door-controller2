@@ -15,6 +15,11 @@ class DoorService:
     DOOR_IO = 7 #pi numbering
     DOOR_OPEN_TIME = 5 #seconds
     door_opened = 0;
+    FRIEND = 1
+    TRUSTEE = 2
+    SUPPORTER = 3
+    MEMBER = 4
+    KEYHOLDER = 5
 
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
@@ -48,12 +53,19 @@ class DoorService:
 	            print "Found tag UID: " + tag.str_x_uid()
 
 		    #authenticate
-		    if tag.authenticate(location="door"):
-		        print "Tag " + tag.str_x_uid() + " authenticated"
+                    (status, roles) = tag.authenticate()
+		    if status:
                         self.recent_tags[tag.str_x_uid()] = os.times()[4]
-                        #open the door
-                        self.door_opened = os.times()[4]
-		        self.write_pi_pin(self.DOOR_IO, 1)
+                        if self.KEYHOLDER in roles:
+                            #open the door
+		            print "Tag " + tag.str_x_uid() + " authenticated"
+                            tag.log_auth("door", "allowed")
+                            self.door_opened = os.times()[4]
+		            self.write_pi_pin(self.DOOR_IO, 1)
+                        else:
+                            print "Tag " + tag.str_x_uid() + " authenticated but NOT keyholder"
+                            tag.log_auth("door", "denied")
+
 		    else:
 		        print "Tag " + tag.str_x_uid() + " NOT authenticated"
 
@@ -148,20 +160,20 @@ class Tag:
                 print "Tag " + self.str_x_uid() + " is not assigned to anyone"
             else:
                 print "Database error, could not load user id for tag: " + str(e)
-            return False
+            return (False, [])
 
         try:
             username = self.db.get_user_name(userid)
         except EntryDatabaseException as e:
             print "Database error, could not load user name: " + str(e)
-            return False
+            return (False, [])
         print "Tag is assigned to user " + userid + " (" + username + ")"
         
         try:
             self.count = self.db.get_tag_count(self.str_x_uid())
         except EntryDatabaseException as e:
             print "Database error, could not load tag count: " + str(e)
-            return False
+            return (False, [])
 
 
         try:
@@ -175,10 +187,10 @@ class Tag:
         except TagException as e:
             #TESTME one and both
             print "Failed to Read sector: " + str(e)
-            return False
+            return (False, [])
         except EntryDatabaseException as e:
             print "Database error: " + str(e)
-            return False
+            return (False, [])
 
         try:
             self.count_a = self.validate_sector(sector_a_data,
@@ -188,7 +200,7 @@ class Tag:
             sector_a_ok = False
         except EntryDatabaseException as e:
             print "Database error: " + str(e)
-            return False
+            return (False, [])
         try:
             self.count_b = self.validate_sector(sector_b_data,
                                                 self.db.get_tag_sector_b_secret(self.str_x_uid()))
@@ -197,11 +209,11 @@ class Tag:
             sector_b_ok = False
         except EntryDatabaseException as e:
             print "Database error: " + str(e)
-            return False
+            return (False, [])
 
         if (sector_a_ok == False) and (sector_b_ok == False):
             print "Failed to authenticate, both sectors invalid"
-            return False
+            return (False, [])
 
         if sector_a_ok and sector_b_ok and 1 < self.subtract(self.count_a, self.count_b) < 65535: #subtract() wraps in 16-bit positive space, -1 is 65535
             #TESTME
@@ -212,7 +224,7 @@ class Tag:
         if (not sector_b_ok) or (sector_a_ok and self.greater_than(self.count_a, self.count_b)):
             if self.less_than(self.count_a, self.count):
                 print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_a)
-                return False
+                return (False, [])
             if self.greater_than(self.count_a, self.count):
                 print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_a) + ", continueing"
             try:
@@ -228,22 +240,22 @@ class Tag:
                                                 self.db.get_tag_sector_b_secret(self.str_x_uid()))
             except TagException as e:
                 print "Failed to update tag: " + str(e)
-                return False
+                return (False, [])
             except EntryDatabaseException as e:
                 print "Database error: " + str(e)
-                return False
+                return (False, [])
 
             if readback != (self.plus(self.count_a, 1)):
                 #TESTME, maybe, it's hard
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_a, 1)) + " Got: " + str(readback)
-                return False
+                return (False, [])
 
             self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_a, 1)) #NEVER sucessfully authenticate without updating the count
             self.db.server_poll()
         else:
             if self.less_than(self.count_b, self.count):
                 print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
-                return False
+                return (False, [])
             if self.greater_than(self.count_b, self.count):
                 print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_b) + ", continuing"
 
@@ -260,21 +272,29 @@ class Tag:
                                                 self.db.get_tag_sector_a_secret(self.str_x_uid()))
             except TagException as e:
                 print "Failed to update tag: " + str(e)
-                return False
+                return (False, [])
             except EntryDatabaseException as e:
                 print "Database error: " + str(e)
-                return False
+                return (False, [])
 
             if readback != (self.plus(self.count_b, 1)):
                 #TESTME, maybe, it's hard
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_b, 1)) + " Got: " + str(readback)
-                return False
+                return (False, [])
 
             self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
             self.db.server_poll()
         
-        self.db.log_successful_auth(self.str_x_uid(), location)
-        return True
+        roles = []
+        try:
+            roles = self.db.get_user_roles(self.db.get_tag_user(self.str_x_uid()))
+        except EntryDatabaseException as e:
+            print "failed to get user roles: " + str(e)
+
+        return (True, roles)
+
+    def log_auth(self, location, result):
+        self.db.log_auth(self.str_x_uid(), location, result)
 
     #return a validated count stored in the sector data given or False
     def validate_sector(self, sector_data, secret):
@@ -712,7 +732,16 @@ class EntryDatabase:
         except KeyError as e:
             raise EntryDatabaseException("TypeError: " + str(e))
 
-    def log_successful_auth(self, uid, location):
+    def get_user_roles(self, userid):
+        try:
+            if type(self.local['users'][userid]['roles']) is list:
+                return self.local['users'][userid]['roles']
+            else:
+                raise EntryDatabaseException("User roles is not a list: " + str(self.local['users'][userid]['roles']))
+        except KeyError as e:
+            raise EntryDatabaseException("TypeError: " + str(e))
+
+    def log_auth(self, uid, location, result):
         #vivify cannot append to lists
         scans = []
         try:
@@ -720,7 +749,7 @@ class EntryDatabase:
         except KeyError:
             pass
 
-        scans.append({"date": int(time.time()), "location": location})
+        scans.append({"date": int(time.time()), "location": location, "result": result})
 
         #this does not need to be stored locally
         p_unsent = dict(self.unsent)
