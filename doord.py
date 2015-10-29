@@ -322,7 +322,7 @@ class Tag:
         return data
         
     def str_x_uid(self):
-        return format(self.uid[0], "x") + format(self.uid[1], "x") + format(self.uid[2], "x") + format(self.uid[3], "x")
+        return format(self.uid[0], "x").zfill(2) + format(self.uid[1], "x").zfill(2) + format(self.uid[2], "x").zfill(2) + format(self.uid[3], "x").zfill(2)
 
     #write a sector to the tag given the count and secret
     def write_sector(self, sector, key, keyspec, secret, count):
