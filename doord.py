@@ -48,7 +48,7 @@ class DoorService:
 	            print "Found tag UID: " + tag.str_x_uid()
 
 		    #authenticate
-		    if tag.authenticate():
+		    if tag.authenticate(location="door"):
 		        print "Tag " + tag.str_x_uid() + " authenticated"
                         self.recent_tags[tag.str_x_uid()] = os.times()[4]
                         #open the door
@@ -134,7 +134,7 @@ class Tag:
         self.unselect()
 
     #attempt the whole authentication process with this tag
-    def authenticate(self):
+    def authenticate(self, location="default"):
         sector_a_ok = True
         sector_b_ok = True
 
@@ -273,6 +273,7 @@ class Tag:
             self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
             self.db.server_poll()
         
+        self.db.log_successful_auth(self.str_x_uid(), location)
         return True
 
     #return a validated count stored in the sector data given or False
@@ -710,6 +711,21 @@ class EntryDatabase:
                 raise EntryDatabaseException("User name is not a string: " + str(self.local['users'][userid]['name']))
         except KeyError as e:
             raise EntryDatabaseException("TypeError: " + str(e))
+
+    def log_successful_auth(self, uid, location):
+        #vivify cannot append to lists
+        scans = []
+        try:
+            scans = self.unsent['tags'][uid]['scans']
+        except KeyError:
+            pass
+
+        scans.append({"date": int(time.time()), "location": location})
+
+        #this does not need to be stored locally
+        p_unsent = dict(self.unsent)
+        self.vivify(p_unsent, ['tags',uid,'scans'], scans)
+        self.unsent.update(p_unsent)
 
 class EntryDatabaseException(Exception):
     pass
