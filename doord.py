@@ -469,29 +469,29 @@ class EntryDatabase:
     #blocking pull of db from server
     def server_pull_now(self):
         try:
-            response = requests.get(self.server_url, cookies={'api_key': self.api_key})
+            response = requests.get(self.server_url, cookies={'SECRET': self.api_key})
             if 200 <= response.status_code < 300:
                 self.local.update(json.loads(response.text))
             else:
-                raise EntryDatabaseException("Server returned bad status to GET: " + str(response.status_code))
+                raise EntryDatabaseException("Server returned bad status to GET: " + str(response.status_code) + " - " + str(response.text))
         except requests.exceptions.RequestException as e:
             raise EntryDatabaseException("GET request error: " + str(e))
 
     #blocking update of server
     def server_push_now(self):
         try:
-            response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(dict(self.unsent)))
+            response = requests.post(self.server_url, cookies={'SECRET': self.api_key}, data = json.dumps(dict(self.unsent)))
             if 200 <= response.status_code < 300:
                 self.unsent.clear()
             else:
-                raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code))
+                raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code) + " - " + str(response.text))
         except requests.exceptions.RequestException as e:
             raise EntryDatabaseException("POST request error: " + str(e))
 
     def _server_poll_worker(self, r_unsent, r_local):
         if len(r_unsent) > 0:
             try:
-                response = requests.post(self.server_url, cookies={'api_key': self.api_key}, data = json.dumps(dict(r_unsent)))
+                response = requests.post(self.server_url, cookies={'SECRET': self.api_key}, data = json.dumps(dict(r_unsent)))
                 if 200 <= response.status_code < 300:
                     r_unsent.clear()
                 else:
@@ -499,17 +499,17 @@ class EntryDatabase:
                     print "Server returned bad status to POST:" + str(response.status_code)
                     return #do not pull if we failed to push, it may clobber unsent from local
             except requests.exceptions.RequestException as e:
-                print "POST request error: " + str(e)
+                print "POST request error: " + str(e) + " - " + str(response.text)
                 return
 
         try:
-            response = requests.get(self.server_url, cookies={'api_key': self.api_key})
+            response = requests.get(self.server_url, cookies={'SECRET': self.api_key})
             if 200 <= response.status_code < 300:
                 r_local = json.loads(response.text)
             else:
                 print "Server returned bad status to GET: " + str(response.status_code)
         except requests.exceptions.RequestException as e:
-            print "GET request error: " + str(e)
+            print "GET request error: " + str(e) + " - " + str(response.text)
 
     #attempt to send unsent changes to the server and update the local copy, asynchronously
     def server_poll(self):
@@ -881,7 +881,7 @@ if len(sys.argv) > 1:
             db.set_tag_sector_b_key_b(tag.str_x_uid(), sector_b_key_b)
             try:
                 db.server_push_now()
-            except EntryDatabaseError as e:
+            except EntryDatabaseException as e:
                 raise
             print "Success."
 
