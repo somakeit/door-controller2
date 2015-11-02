@@ -20,6 +20,7 @@ class DoorService:
     SUPPORTER = 3
     MEMBER = 4
     KEYHOLDER = 5
+    LOCATION = "DOOR1"
 
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
@@ -59,12 +60,12 @@ class DoorService:
                         if self.KEYHOLDER in roles:
                             #open the door
                             print "Tag " + tag.str_x_uid() + " authenticated"
-                            tag.log_auth("door", "allowed")
+                            tag.log_auth(self.LOCATION, "allowed")
                             self.door_opened = os.times()[4]
                             self.write_pi_pin(self.DOOR_IO, 1)
                         else:
                             print "Tag " + tag.str_x_uid() + " authenticated but NOT keyholder"
-                            tag.log_auth("door", "denied")
+                            tag.log_auth(self.LOCATION, "denied")
 
                     else:
                         print "Tag " + tag.str_x_uid() + " NOT authenticated"
