@@ -39,40 +39,40 @@ class DoorService:
         while True:
             (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL) #searches for a card for up to approxamately 100ms
 
-	    # is a device presented
-	    if status == self.nfc.MI_OK:
-	    
-	        # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
-	        (status,uid) = self.nfc.MFRC522_Anticoll()
+            # is a device presented
+            if status == self.nfc.MI_OK:
+
+                # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
+                (status,uid) = self.nfc.MFRC522_Anticoll()
                 if status == self.nfc.MI_OK:
-	            tag = Tag(uid, self.nfc, self.db)
+                    tag = Tag(uid, self.nfc, self.db)
                     if self.recent_tags.has_key(tag.str_x_uid()):
                         if self.recent_tags[tag.str_x_uid()] + self.DEBOUNCE > os.times()[4]:
                             del tag
                             continue #ignore a tag for DEBOUNCE seconds after sucessful auth
-	            print "Found tag UID: " + tag.str_x_uid()
+                    print "Found tag UID: " + tag.str_x_uid()
 
-		    #authenticate
+                    #authenticate
                     (status, roles) = tag.authenticate()
-		    if status:
+                    if status:
                         self.recent_tags[tag.str_x_uid()] = os.times()[4]
                         if self.KEYHOLDER in roles:
                             #open the door
-		            print "Tag " + tag.str_x_uid() + " authenticated"
+                            print "Tag " + tag.str_x_uid() + " authenticated"
                             tag.log_auth("door", "allowed")
                             self.door_opened = os.times()[4]
-		            self.write_pi_pin(self.DOOR_IO, 1)
+                            self.write_pi_pin(self.DOOR_IO, 1)
                         else:
                             print "Tag " + tag.str_x_uid() + " authenticated but NOT keyholder"
                             tag.log_auth("door", "denied")
 
-		    else:
-		        print "Tag " + tag.str_x_uid() + " NOT authenticated"
+                    else:
+                        print "Tag " + tag.str_x_uid() + " NOT authenticated"
 
                     del tag
 
-	        else:
-	            print "Failed to read UID"
+                else:
+                    print "Failed to read UID"
 
             if self.door_opened > 0 and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
                 #close the door
@@ -101,7 +101,7 @@ class DoorService:
             except IOError:
                 if attempts > 10:
                     raise
-		time.sleep(0.1)
+                time.sleep(0.1)
 
     def release_pi_pin(self, pin):
         fexp = open('/sys/class/gpio/unexport', 'w')
@@ -131,7 +131,7 @@ class Tag:
     #create tag object representing one session with one tag
     def __init__(self, uid, nfc, db):
         self.uid = uid
-	self.nfc = nfc
+        self.nfc = nfc
         self.db = db
 
         self.select()
@@ -168,7 +168,7 @@ class Tag:
             print "Database error, could not load user name: " + str(e)
             return (False, [])
         print "Tag is assigned to user " + userid + " (" + username + ")"
-        
+
         try:
             self.count = self.db.get_tag_count(self.str_x_uid())
         except EntryDatabaseException as e:
@@ -220,7 +220,7 @@ class Tag:
             print "Warning: valid sector counts spaced higher than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
         if sector_a_ok and sector_b_ok and (self.count_a == self.count_b):
             print "Warning: valid sector counts spaced lower than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
-        
+
         if (not sector_b_ok) or (sector_a_ok and self.greater_than(self.count_a, self.count_b)):
             if self.less_than(self.count_a, self.count):
                 print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_a)
@@ -284,7 +284,7 @@ class Tag:
 
             self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
             self.db.server_poll()
-        
+
         roles = []
         try:
             roles = self.db.get_user_roles(self.db.get_tag_user(self.str_x_uid()))
@@ -310,18 +310,18 @@ class Tag:
         cost = sector_data[3]
         digest = self.unencode_bcrypt64(sector_data[4:44])
         reserved = sector_data[44:46]
-        
+
         if algorithm > (len(self.BCRYPT_VERSION) - 1):
             #TESTME
             raise TagException("Unknown bcrypt algorithm: " + str(algorithm))
-        
+
         for b in reserved:
             if b != 0:
                 #TESTME
                 raise TagException("Data in padding")
 
         read_hash = '$' + str(self.BCRYPT_VERSION[algorithm]) + '$' + str(cost).zfill(2) + '$' + digest
-        
+
         calculated_hash = bcrypt.hashpw(str(count) + str(secret), read_hash)
 
         if calculated_hash != read_hash:
@@ -341,7 +341,7 @@ class Tag:
             raise TagException("Failed to read sector " + str(sector) + " of Tag " + self.str_x_uid())
 
         return data
-        
+
     def str_x_uid(self):
         return format(self.uid[0], "x").zfill(2) + format(self.uid[1], "x").zfill(2) + format(self.uid[2], "x").zfill(2) + format(self.uid[3], "x").zfill(2)
 
@@ -360,7 +360,7 @@ class Tag:
         crc = crc16.crc16xmodem("".join(map(chr, data))) #crc
         data.append(crc >> 8)
         data.append(crc & 0xFF)
-        
+
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if status != self.nfc.MI_OK:
             raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
@@ -408,7 +408,7 @@ class Tag:
         binary = []
         for i in range(int(ceil(len(list(base64))*6/8.0))):
             binary.append(int(((binary_int >> (i * 8)) & 0xff)))
-        return binary            
+        return binary
 
     #16-bit wrapping plus function
     def plus(self, left, right):
@@ -562,7 +562,7 @@ class EntryDatabase:
                 dic[key] = value
             else:
                 self.vivify(dic[key], keys, value)
-      
+
     def set_tag_count(self, uid, count):
         p_local = dict(self.local)
         p_unsent = dict(self.unsent)
@@ -625,7 +625,7 @@ class EntryDatabase:
         self.vivify(p_unsent, ['tags',uid,'sector_a_key_a'], base64.b64encode("".join(map(chr, key))))
         self.local.update(p_local)
         self.unsent.update(p_unsent)
-    
+
     def get_tag_sector_a_key_b(self, uid):
         try:
             if type(self.local['tags'][uid]['sector_a_key_b']) in [str,unicode]:
@@ -646,7 +646,7 @@ class EntryDatabase:
         self.vivify(p_unsent, ['tags',uid,'sector_a_key_b'], base64.b64encode("".join(map(chr, key))))
         self.local.update(p_local)
         self.unsent.update(p_unsent)
-    
+
     def get_tag_sector_b_key_a(self, uid):
         try:
             if type(self.local['tags'][uid]['sector_b_key_a']) in [str,unicode]:
@@ -667,7 +667,7 @@ class EntryDatabase:
         self.vivify(p_unsent, ['tags',uid,'sector_b_key_a'], base64.b64encode("".join(map(chr, key))))
         self.local.update(p_local)
         self.unsent.update(p_unsent)
-    
+
     def get_tag_sector_b_key_b(self, uid):
         try:
             if type(self.local['tags'][uid]['sector_b_key_b']) in [str,unicode]:
@@ -688,7 +688,7 @@ class EntryDatabase:
         self.vivify(p_unsent, ['tags',uid,'sector_b_key_b'], base64.b64encode("".join(map(chr, key))))
         self.local.update(p_local)
         self.unsent.update(p_unsent)
-    
+
     def get_tag_sector_a_secret(self, uid):
         try:
             if type(self.local['tags'][uid]['sector_a_secret']) in [str,unicode]:
@@ -697,7 +697,7 @@ class EntryDatabase:
                 raise EntryDatabaseException("sector_a_secret is not string: " + str(self.local['tags'][uid]['sector_a_secret']))
         except KeyError as e:
             raise EntryDatabaseException("TypeError: " + str(e))
-    
+
     def set_tag_sector_a_secret(self, uid, secret):
         p_local = dict(self.local)
         p_unsent = dict(self.unsent)
@@ -714,7 +714,7 @@ class EntryDatabase:
                 raise EntryDatabaseException("sector_b_secret is not string: " + str(self.local['tags'][uid]['sector_b_secret']))
         except KeyError as e:
             raise EntryDatabaseException("TypeError: " + str(e))
-    
+
     def set_tag_sector_b_secret(self, uid, secret):
         p_local = dict(self.local)
         p_unsent = dict(self.unsent)
@@ -785,11 +785,11 @@ if len(sys.argv) > 1:
     while status != nfc.MI_OK:
         (status,TagType) = nfc.MFRC522_Request(nfc.PICC_REQIDL)
     print "NFC device presented"
-	    
+
     (status,uid) = nfc.MFRC522_Anticoll()
     if status == nfc.MI_OK:
         tag = Tag(uid, nfc, db)
-	print "Found tag UID: " + tag.str_x_uid()
+        print "Found tag UID: " + tag.str_x_uid()
 
         # bcrypt will reject a count padded with a null (chr(0)) character.
         # It will also reject unicode text objects (u"hello") but not unicode
@@ -838,7 +838,7 @@ if len(sys.argv) > 1:
                                              sector_a_secret)
             if readback_a != 0:
                 raise Exception("sector a (1) readback not correct.")
-            
+
             sector_b_backdata = tag.read_sector(2,
                                                 default_key,
                                                 default_keyspec)
@@ -859,7 +859,7 @@ if len(sys.argv) > 1:
                                              sector_a_secret)
             if readback_a != 0:
                 raise Exception("sector a (1) readback not correct.")
-        
+
             sector_b_backdata = tag.read_sector(2,
                                                 sector_b_key_a,
                                                 default_keyspec)
