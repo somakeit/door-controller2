@@ -756,7 +756,16 @@ class EntryDatabase:
         except KeyError:
             pass
 
-        scans.append({"date": int(time.time()), "location": location, "result": result})
+        user = None
+        try:
+            user = self.get_tag_user(uid)
+        except EntryDatabaseException:
+            pass
+
+        scans.append({"date": int(time.time()),
+                      "location": location,
+                      "result": result,
+                      "assigned_user": user})
 
         #this does not need to be stored locally
         p_unsent = dict(self.unsent)
