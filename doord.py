@@ -47,28 +47,28 @@ class DoorService:
                 (status,uid) = self.nfc.MFRC522_Anticoll()
                 if status == self.nfc.MI_OK:
                     tag = Tag(uid, self.nfc, self.db)
-                    if self.recent_tags.has_key(tag.str_x_uid()):
-                        if self.recent_tags[tag.str_x_uid()] + self.DEBOUNCE > os.times()[4]:
+                    if self.recent_tags.has_key(str(tag)):
+                        if self.recent_tags[str(tag)] + self.DEBOUNCE > os.times()[4]:
                             del tag
                             continue #ignore a tag for DEBOUNCE seconds after sucessful auth
-                    print "Found tag UID: " + tag.str_x_uid()
+                    print "Found tag UID: " + str(tag)
 
                     #authenticate
                     (status, roles) = tag.authenticate()
                     if status:
-                        self.recent_tags[tag.str_x_uid()] = os.times()[4]
+                        self.recent_tags[str(tag)] = os.times()[4]
                         if self.KEYHOLDER in roles:
                             #open the door
-                            print "Tag " + tag.str_x_uid() + " authenticated"
+                            print "Tag " + str(tag) + " authenticated"
                             tag.log_auth(self.LOCATION, "allowed")
                             self.door_opened = os.times()[4]
                             self.write_pi_pin(self.DOOR_IO, 1)
                         else:
-                            print "Tag " + tag.str_x_uid() + " authenticated but NOT keyholder"
+                            print "Tag " + str(tag) + " authenticated but NOT keyholder"
                             tag.log_auth(self.LOCATION, "denied")
 
                     else:
-                        print "Tag " + tag.str_x_uid() + " NOT authenticated"
+                        print "Tag " + str(tag) + " NOT authenticated"
 
                     del tag
 
@@ -152,13 +152,13 @@ class Tag:
         sector_b_ok = True
 
         try:
-            userid = self.db.get_tag_user(self.str_x_uid())
+            userid = self.db.get_tag_user(str(self))
         except EntryDatabaseException as e:
             #TESTME
             if str(e) == "Unkown tag":
-                print "Tag " + self.str_x_uid() + " is alien"
+                print "Tag " + str(self) + " is alien"
             elif str(e) == "Unassigned tag":
-                print "Tag " + self.str_x_uid() + " is not assigned to anyone"
+                print "Tag " + str(self) + " is not assigned to anyone"
             else:
                 print "Database error, could not load user id for tag: " + str(e)
             return (False, [])
@@ -171,19 +171,19 @@ class Tag:
         print "Tag is assigned to user " + userid + " (" + username + ")"
 
         try:
-            self.count = self.db.get_tag_count(self.str_x_uid())
+            self.count = self.db.get_tag_count(str(self))
         except EntryDatabaseException as e:
             print "Database error, could not load tag count: " + str(e)
             return (False, [])
 
 
         try:
-            sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
-                                             self.db.get_tag_sector_a_key_b(self.str_x_uid()),
+            sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(str(self)),
+                                             self.db.get_tag_sector_a_key_b(str(self)),
                                              self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields
 
-            sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
-                                             self.db.get_tag_sector_b_key_b(self.str_x_uid()),
+            sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(str(self)),
+                                             self.db.get_tag_sector_b_key_b(str(self)),
                                              self.nfc.PICC_AUTHENT1B)
         except TagException as e:
             #TESTME one and both
@@ -195,7 +195,7 @@ class Tag:
 
         try:
             self.count_a = self.validate_sector(sector_a_data,
-                                                self.db.get_tag_sector_a_secret(self.str_x_uid()))
+                                                self.db.get_tag_sector_a_secret(str(self)))
         except TagException as e:
             print "Failed to validate sector a: " + str(e)
             sector_a_ok = False
@@ -204,7 +204,7 @@ class Tag:
             return (False, [])
         try:
             self.count_b = self.validate_sector(sector_b_data,
-                                                self.db.get_tag_sector_b_secret(self.str_x_uid()))
+                                                self.db.get_tag_sector_b_secret(str(self)))
         except TagException as e:
             print "Failed to validate sector b: " + str(e)
             sector_b_ok = False
@@ -229,16 +229,16 @@ class Tag:
             if self.greater_than(self.count_a, self.count):
                 print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_a) + ", continueing"
             try:
-                self.write_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
-                                  self.db.get_tag_sector_b_key_b(self.str_x_uid()),
+                self.write_sector(self.db.get_tag_sector_b_sector(str(self)),
+                                  self.db.get_tag_sector_b_key_b(str(self)),
                                   self.nfc.PICC_AUTHENT1B,
-                                  self.db.get_tag_sector_b_secret(self.str_x_uid()),
+                                  self.db.get_tag_sector_b_secret(str(self)),
                                   self.plus(self.count_a, 1))
-                sector_b_backdata = self.read_sector(self.db.get_tag_sector_b_sector(self.str_x_uid()),
-                                                     self.db.get_tag_sector_b_key_b(self.str_x_uid()),
+                sector_b_backdata = self.read_sector(self.db.get_tag_sector_b_sector(str(self)),
+                                                     self.db.get_tag_sector_b_key_b(str(self)),
                                                      self.nfc.PICC_AUTHENT1B)
                 readback = self.validate_sector(sector_b_backdata,
-                                                self.db.get_tag_sector_b_secret(self.str_x_uid()))
+                                                self.db.get_tag_sector_b_secret(str(self)))
             except TagException as e:
                 print "Failed to update tag: " + str(e)
                 return (False, [])
@@ -251,7 +251,7 @@ class Tag:
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_a, 1)) + " Got: " + str(readback)
                 return (False, [])
 
-            self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_a, 1)) #NEVER sucessfully authenticate without updating the count
+            self.db.set_tag_count(str(self), self.plus(self.count_a, 1)) #NEVER sucessfully authenticate without updating the count
             self.db.server_poll()
         else:
             if self.less_than(self.count_b, self.count):
@@ -261,16 +261,16 @@ class Tag:
                 print "Tag ahead of expected count, expected: " + str(self.count) + ", tag count: " + str(self.count_b) + ", continuing"
 
             try:
-                self.write_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
-                                  self.db.get_tag_sector_a_key_b(self.str_x_uid()),
+                self.write_sector(self.db.get_tag_sector_a_sector(str(self)),
+                                  self.db.get_tag_sector_a_key_b(str(self)),
                                   self.nfc.PICC_AUTHENT1B,
-                                  self.db.get_tag_sector_a_secret(self.str_x_uid()),
+                                  self.db.get_tag_sector_a_secret(str(self)),
                                   self.plus(self.count_b, 1))
-                sector_a_backdata = self.read_sector(self.db.get_tag_sector_a_sector(self.str_x_uid()),
-                                                     self.db.get_tag_sector_a_key_b(self.str_x_uid()),
+                sector_a_backdata = self.read_sector(self.db.get_tag_sector_a_sector(str(self)),
+                                                     self.db.get_tag_sector_a_key_b(str(self)),
                                                      self.nfc.PICC_AUTHENT1B)
                 readback = self.validate_sector(sector_a_backdata,
-                                                self.db.get_tag_sector_a_secret(self.str_x_uid()))
+                                                self.db.get_tag_sector_a_secret(str(self)))
             except TagException as e:
                 print "Failed to update tag: " + str(e)
                 return (False, [])
@@ -283,19 +283,19 @@ class Tag:
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_b, 1)) + " Got: " + str(readback)
                 return (False, [])
 
-            self.db.set_tag_count(self.str_x_uid(), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
+            self.db.set_tag_count(str(self), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
             self.db.server_poll()
 
         roles = []
         try:
-            roles = self.db.get_user_roles(self.db.get_tag_user(self.str_x_uid()))
+            roles = self.db.get_user_roles(self.db.get_tag_user(str(self)))
         except EntryDatabaseException as e:
             print "failed to get user roles: " + str(e)
 
         return (True, roles)
 
     def log_auth(self, location, result):
-        self.db.log_auth(self.str_x_uid(), location, result)
+        self.db.log_auth(str(self), location, result)
 
     #return a validated count stored in the sector data given or False
     def validate_sector(self, sector_data, secret):
@@ -335,15 +335,15 @@ class Tag:
     def read_sector(self, sector, key, keyspec):
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + str(self))
 
         (status, data) = self.nfc.Read_Sector(sector)
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to read sector " + str(sector) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to read sector " + str(sector) + " of Tag " + str(self))
 
         return data
 
-    def str_x_uid(self):
+    def __str__(self):
         return format(self.uid[0], "x").zfill(2) + format(self.uid[1], "x").zfill(2) + format(self.uid[2], "x").zfill(2) + format(self.uid[3], "x").zfill(2)
 
     #write a sector to the tag given the count and secret
@@ -364,28 +364,28 @@ class Tag:
 
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if status != self.nfc.MI_OK:
-            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + str(self))
         (status, backData) = self.nfc.Write_Block(sector * 4, data[0:16])
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4) + " of Tag " + str(self))
         (status, backData) = self.nfc.Write_Block(sector * 4 + 1, data[16:32])
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 1) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 1) + " of Tag " + str(self))
         (status, backData) = self.nfc.Write_Block(sector * 4 + 2, data[32:48])
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 2) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 2) + " of Tag " + str(self))
 
     def configure_sector(self, sector, key, keyspec, key_a, lock_bytes, key_b):
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
         if status != nfc.MI_OK:
-            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + str(self))
         data = []
         data.extend(key_a)
         data.extend(lock_bytes)
         data.extend(key_b)
         (status, backData) = nfc.Write_Block(sector * 4 + 3, data)
         if (status != self.nfc.MI_OK):
-            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 3) + " of Tag " + self.str_x_uid())
+            raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 3) + " of Tag " + str(self))
 
     #convert from binary byte array to bcrypt base64
     def unencode_bcrypt64(self, binary_arr):
@@ -790,7 +790,7 @@ if len(sys.argv) > 1:
     (status,uid) = nfc.MFRC522_Anticoll()
     if status == nfc.MI_OK:
         tag = Tag(uid, nfc, db)
-        print "Found tag UID: " + tag.str_x_uid()
+        print "Found tag UID: " + str(tag)
 
         # bcrypt will reject a count padded with a null (chr(0)) character.
         # It will also reject unicode text objects (u"hello") but not unicode
@@ -870,16 +870,16 @@ if len(sys.argv) > 1:
                 raise Exception("sector b (2) readback not correct.")
 
             print "Sending tag details to server."
-            db.set_tag_user(tag.str_x_uid(), None)
-            db.set_tag_count(tag.str_x_uid(), 1)
-            db.set_tag_sector_a_sector(tag.str_x_uid(), 1)
-            db.set_tag_sector_b_sector(tag.str_x_uid(), 2)
-            db.set_tag_sector_a_secret(tag.str_x_uid(), sector_a_secret)
-            db.set_tag_sector_b_secret(tag.str_x_uid(), sector_b_secret)
-            db.set_tag_sector_a_key_a(tag.str_x_uid(), sector_a_key_a)
-            db.set_tag_sector_a_key_b(tag.str_x_uid(), sector_a_key_b)
-            db.set_tag_sector_b_key_a(tag.str_x_uid(), sector_b_key_a)
-            db.set_tag_sector_b_key_b(tag.str_x_uid(), sector_b_key_b)
+            db.set_tag_user(str(tag), None)
+            db.set_tag_count(str(tag), 1)
+            db.set_tag_sector_a_sector(str(tag), 1)
+            db.set_tag_sector_b_sector(str(tag), 2)
+            db.set_tag_sector_a_secret(str(tag), sector_a_secret)
+            db.set_tag_sector_b_secret(str(tag), sector_b_secret)
+            db.set_tag_sector_a_key_a(str(tag), sector_a_key_a)
+            db.set_tag_sector_a_key_b(str(tag), sector_a_key_b)
+            db.set_tag_sector_b_key_a(str(tag), sector_b_key_a)
+            db.set_tag_sector_b_key_b(str(tag), sector_b_key_b)
             try:
                 db.server_push_now()
             except EntryDatabaseException as e:
