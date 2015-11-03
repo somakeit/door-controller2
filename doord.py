@@ -554,7 +554,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("count not an int: " + str(self.local['tags'][uid]['count'])) #TESTME counts >65535 and <0
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def vivify(self, dic, keys, value):
         key = keys.pop(0)
@@ -585,7 +585,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_a_sector not an int: " + str(self.local['tags'][uid]['sector_a_sector']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_a_sector(self, uid, sector):
         p_local = dict(self.local)
@@ -602,7 +602,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_b_sector not an int: " + str(self.local['tags'][uid]['sector_b_sector']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_b_sector(self, uid, sector):
         p_local = dict(self.local)
@@ -623,7 +623,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_a_key_a not a string: " + str(self.local['tags'][uid]['sector_a_key_a']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_a_key_a(self, uid, key):
         p_local = dict(self.local)
@@ -644,7 +644,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_a_key_b not a string: " + str(self.local['tags'][uid]['sector_a_key_b']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_a_key_b(self, uid, key):
         p_local = dict(self.local)
@@ -665,7 +665,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_b_key_a not a string: " + str(self.local['tags'][uid]['sector_b_key_a']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_b_key_a(self, uid, key):
         p_local = dict(self.local)
@@ -686,7 +686,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_b_key_b not a string: " + str(self.local['tags'][uid]['sector_b_key_b']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_b_key_b(self, uid, key):
         p_local = dict(self.local)
@@ -703,7 +703,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_a_secret is not string: " + str(self.local['tags'][uid]['sector_a_secret']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_a_secret(self, uid, secret):
         p_local = dict(self.local)
@@ -720,7 +720,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("sector_b_secret is not string: " + str(self.local['tags'][uid]['sector_b_secret']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def set_tag_sector_b_secret(self, uid, secret):
         p_local = dict(self.local)
@@ -737,7 +737,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("User name is not a string: " + str(self.local['users'][userid]['name']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def get_user_roles(self, userid):
         try:
@@ -746,7 +746,7 @@ class EntryDatabase:
             else:
                 raise EntryDatabaseException("User roles is not a list: " + str(self.local['users'][userid]['roles']))
         except KeyError as e:
-            raise EntryDatabaseException("TypeError: " + str(e))
+            raise EntryDatabaseException("KeyError: " + str(e))
 
     def log_auth(self, uid, location, result):
         #vivify cannot append to lists
