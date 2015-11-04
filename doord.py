@@ -43,7 +43,7 @@ class DoorService:
             # is a device presented
             if status == self.nfc.MI_OK:
 
-                # run anti-collision and let one id fall out #TODO work out how to select other tags for people presenting a whole wallet. We should get an array of UIDs.
+                # run anti-collision and let the next id fall out
                 (status,uid) = self.nfc.MFRC522_Anticoll()
                 if status == self.nfc.MI_OK:
                     tag = Tag(uid, self.nfc, self.db)
