@@ -1,6 +1,6 @@
 import sys, os, syslog, json, base64, time
 from math import ceil
-from multiprocessing import Process, Manager
+from multiprocessing import Process, Manager, Lock
 import crc16, bcrypt, requests
 sys.path.append("MFRC522-python")
 import MFRC522
@@ -54,6 +54,8 @@ class DoorService:
                     print "Found tag UID: " + str(tag)
 
                     #authenticate
+                    #lock database first to keep updates whole
+                    self.db.lock.acquire()
                     (status, roles) = tag.authenticate()
                     if status:
                         self.recent_tags[str(tag)] = os.times()[4]
@@ -72,6 +74,7 @@ class DoorService:
 
                     else:
                         print "Tag " + str(tag) + " NOT authenticated"
+                    self.db.lock.release()
 
                     del tag
 
@@ -441,8 +444,10 @@ class TagException(Exception):
 class EntryDatabase:
     proc = None
     mgr = Manager()
+    lock = Lock()
     local = mgr.dict() #shared objects
-    unsent = mgr.dict()
+    unsent = mgr.dict() #updates we've never tried to send
+    send_queue = mgr.list() #list uf updates we're trying to send in order
     server_url = None
     api_key = None
 
@@ -481,33 +486,48 @@ class EntryDatabase:
 
     #blocking update of server
     def server_push_now(self):
-        try:
-            response = requests.post(self.server_url,
-                                     cookies={'SECRET': self.api_key},
-                                     data = json.dumps(dict(self.unsent)),
-                                     headers={'content-type': 'application/json'})
-            if response.status_code == requests.codes.ok:
-                self.unsent.clear()
-            else:
-                raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code) + " - " + str(response.text))
-        except requests.exceptions.RequestException as e:
-            raise EntryDatabaseException("POST request error: " + str(e))
+        self.send_queue.append(dict(self.unsent))
+        self.unsent.clear()
 
-    def _server_poll_worker(self, r_unsent, r_local):
-        if len(r_unsent) > 0:
-            try:
+        try:
+            for i in range(len(self.send_queue)):
                 response = requests.post(self.server_url,
                                          cookies={'SECRET': self.api_key},
-                                         data = json.dumps(dict(r_unsent)),
+                                         data = json.dumps(self.send_queue[i]),
                                          headers={'content-type': 'application/json'})
-                if response.status_code == requests.codes.ok:
-                    r_unsent.clear()
-                else:
-                    #there is nobody to catch anything thrown here
-                    print "Server returned bad status to POST:" + str(response.status_code)
-                    return #do not pull if we failed to push, it may clobber unsent from local
+            if response.status_code == requests.codes.ok:
+                self.send_queue.pop(i)
+            else:
+                raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code) + " - " + str(response.text)) + " (send_queue: " + str(len(self.send_queue)) + ")"
+        except requests.exceptions.RequestException as e:
+            raise EntryDatabaseException("POST request error: " + str(e)) + " (send_queue: " + str(len(self.send_queue)) + ")"
+
+    def _server_poll_worker(self):
+        if len(self.unsent) > 0:
+            #copy complete updates from unsent
+            self.lock.acquire()
+            self.send_queue.append(dict(self.unsent))
+            self.unsent.clear()
+            self.lock.release()
+
+            #try to send all the updates in order
+            try:
+                for i in range(len(self.send_queue)):
+                    response = requests.post(self.server_url,
+                                             cookies={'SECRET': self.api_key},
+                                             data = json.dumps(self.send_queue[i]),
+                                             headers={'content-type': 'application/json'})
+                    if response.status_code == requests.codes.ok:
+                        self.send_queue.pop(i)
+                    else:
+                        #there is nobody to catch anything thrown here
+                        print "Server returned bad status to POST:" + str(response.status_code) + " (send_queue: " + str(len(self.send_queue)) + ")"
+                        #do not pull if we fail to post, it may clobber unsent from local
+                        #do not continue to push send_queue on a failure, it may deliver out of order
+                        return
             except requests.exceptions.RequestException as e:
-                print "POST request error: " + str(e) + " - " + str(response.text)
+                print "POST request error: " + str(e) + " - " + str(response.text) + " (send_queue: " + str(len(self.send_queue)) + ")"
+                #same warnings as bad status code above
                 return
 
         try:
@@ -524,7 +544,7 @@ class EntryDatabase:
         if type(self.proc) is Process and self.proc.is_alive():
             print "Server poll still in progress, not starting another."
         else:
-            self.proc = Process(target = self._server_poll_worker, args = (self.unsent, self.local))
+            self.proc = Process(target = self._server_poll_worker)
             self.proc.start()
 
     def get_tag_user(self, uid):
@@ -886,6 +906,7 @@ if len(sys.argv) > 1:
                 raise Exception("sector b (2) readback not correct.")
 
             print "Sending tag details to server."
+            db.lock.acquire()
             db.set_tag_user(str(tag), None)
             db.set_tag_count(str(tag), 1)
             db.set_tag_sector_a_sector(str(tag), 1)
@@ -900,6 +921,7 @@ if len(sys.argv) > 1:
                 db.server_push_now()
             except EntryDatabaseException as e:
                 raise
+            db.lock.release()
             print "Success."
 
         except Exception as e:
