@@ -66,6 +66,9 @@ class DoorService:
                         else:
                             print "Tag " + str(tag) + " authenticated but NOT keyholder"
                             tag.log_auth(self.LOCATION, "denied")
+                        #update the server with tag counts and scans early
+                        self.db.server_poll()
+                        self.last_server_poll = os.times()[4]
 
                     else:
                         print "Tag " + str(tag) + " NOT authenticated"
@@ -252,7 +255,6 @@ class Tag:
                 return (False, [])
 
             self.db.set_tag_count(str(self), self.plus(self.count_a, 1)) #NEVER sucessfully authenticate without updating the count
-            self.db.server_poll()
         else:
             if self.less_than(self.count_b, self.count):
                 print "Duplicate tag detected, expected count: " + str(self.count) + ", tag count: " + str(self.count_b)
@@ -284,7 +286,6 @@ class Tag:
                 return (False, [])
 
             self.db.set_tag_count(str(self), self.plus(self.count_b, 1)) #NEVER sucessfully authenticate without updating the count
-            self.db.server_poll()
 
         roles = []
         try:
