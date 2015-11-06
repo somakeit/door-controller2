@@ -3,6 +3,7 @@ import sys, os, syslog, json, base64, time
 from math import ceil
 from multiprocessing import Process, Manager, Lock
 import crc16, bcrypt, requests
+import RPi.GPIO as gpio
 sys.path.append("MFRC522-python")
 import MFRC522
 
@@ -15,7 +16,11 @@ class DoorService:
     last_server_poll = os.times()[4] #EntryDatabase will force a blocking poll when instantiated
     DOOR_IO = 7 #pi numbering
     DOOR_OPEN_TIME = 5 #seconds
-    door_opened = 0;
+    door_opened = 0
+    LED_IO = 18
+    LED_HEARTBEAT_TIMES = (0.1, 5) # on, off time in seconds
+    LED_DOOR_OPEN_TIMES = (0.25, 0.25)
+    led_last_time = 0
     FRIEND = 1
     TRUSTEE = 2
     SUPPORTER = 3
@@ -27,13 +32,17 @@ class DoorService:
         self.nfc = MFRC522.MFRC522()
         self.db = EntryDatabase()
 
-        self.set_pi_pin_mode(self.DOOR_IO, 'out')
-        self.write_pi_pin(self.DOOR_IO, 0)
+        gpio.setmode(gpio.BOARD)
+        gpio.setup(self.DOOR_IO, gpio.OUT)
+        gpio.output(self.DOOR_IO, gpio.LOW)
+        if self.LED_IO:
+            gpio.setup(self.LED_IO, gpio.OUT)
+            gpio.output(self.LED_IO, gpio.LOW)
 
         print "Initialised"
 
     def __del__(self):
-        self.release_pi_pin(self.DOOR_IO)
+        gpio.cleanup()
         del self.nfc
         del self.db
 
@@ -52,6 +61,7 @@ class DoorService:
                         if self.recent_tags[str(tag)] + self.DEBOUNCE > os.times()[4]:
                             del tag
                             continue #ignore a tag for DEBOUNCE seconds after sucessful auth
+                    gpio.output(self.LED_IO, gpio.HIGH)
                     print "Found tag UID: " + str(tag)
 
                     #authenticate
@@ -65,7 +75,7 @@ class DoorService:
                             print "Tag " + str(tag) + " authenticated"
                             tag.log_auth(self.LOCATION, "allowed")
                             self.door_opened = os.times()[4]
-                            self.write_pi_pin(self.DOOR_IO, 1)
+                            gpio.output(self.DOOR_IO, gpio.HIGH)
                         else:
                             print "Tag " + str(tag) + " authenticated but NOT keyholder"
                             tag.log_auth(self.LOCATION, "denied")
@@ -78,51 +88,35 @@ class DoorService:
                     self.db.lock.release()
 
                     del tag
+                    gpio.output(self.LED_IO, gpio.LOW)
 
                 else:
                     print "Failed to read UID"
 
             if self.door_opened > 0 and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
                 #close the door
-                self.write_pi_pin(self.DOOR_IO, 0)
+                gpio.output(self.DOOR_IO, gpio.LOW)
                 self.door_opened = 0
 
             if os.times()[4] > self.last_server_poll + self.SERVER_POLL:
                 self.db.server_poll()
                 self.last_server_poll = os.times()[4]
 
-    def set_pi_pin_mode(self, pin, mode):
-        fexp = open('/sys/class/gpio/export', 'w')
-        fexp.write(str(pin))
-        try:
-            fexp.close()
-        except IOError:
-            del fexp
-        attempts = 0
-        while True:
-            attempts += 1
-            try:
-                fdir = open('/sys/class/gpio/gpio' + str(pin) + '/direction', 'w')
-                fdir.write(mode)
-                fdir.close()
-                break
-            except IOError:
-                if attempts > 10:
-                    raise
-                time.sleep(0.1)
-
-    def release_pi_pin(self, pin):
-        fexp = open('/sys/class/gpio/unexport', 'w')
-        fexp.write(str(pin))
-        try:
-            fexp.close()
-        except IOError:
-            del fexp
-
-    def write_pi_pin(self, pin, val):
-        fval = open('/sys/class/gpio/gpio' + str(pin) + '/value', 'w')
-        fval.write(str(val))
-        fval.close()
+            if gpio.input(self.DOOR_IO):
+                #door open
+                (ledon, ledoff) = self.LED_DOOR_OPEN_TIMES
+            else:
+                (ledon, ledoff) = self.LED_HEARTBEAT_TIMES
+            if gpio.input(self.LED_IO):
+                #LED on
+                if os.times()[4] > self.led_last_time + ledon:
+                    gpio.output(self.LED_IO, gpio.LOW)
+                    self.led_last_time = os.times()[4]
+            else:
+                #LED off
+                if os.times()[4] > self.led_last_time + ledoff:
+                    gpio.output(self.LED_IO, gpio.HIGH)
+                    self.led_last_time = os.times()[4]
 
 class Tag:
     uid = None
