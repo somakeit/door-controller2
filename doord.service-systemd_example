@@ -1,0 +1,16 @@
+# Service file for use with systemd
+# Configure your options and copy this file to /etc/systemd/system/doord.service
+# Output will be sent to syslog
+[Unit]
+Description=Door Controller
+After=network.target
+
+[Service]
+WorkingDirectory=/home/doord/
+ExecStart=/home/doord/door-controller2/doord.py
+User=doord
+Group=doord
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
