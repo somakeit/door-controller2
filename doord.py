@@ -10,7 +10,6 @@ import MFRC522
 class DoorService:
     nfc = None
     db = None
-    DEBOUNCE = 5 #seconds
     recent_tags = {}
     SERVER_POLL = 300 #seconds
     last_server_poll = os.times()[4] #EntryDatabase will force a blocking poll when instantiated
@@ -58,7 +57,7 @@ class DoorService:
                 if status == self.nfc.MI_OK:
                     tag = Tag(uid, self.nfc, self.db)
                     if self.recent_tags.has_key(str(tag)):
-                        if self.recent_tags[str(tag)] + self.DEBOUNCE > os.times()[4]:
+                        if self.recent_tags[str(tag)] + self.DOOR_OPEN_TIME > os.times()[4]:
                             del tag
                             continue #ignore a tag for DEBOUNCE seconds after sucessful auth
                     gpio.output(self.LED_IO, gpio.HIGH)
