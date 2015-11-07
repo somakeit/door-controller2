@@ -19,7 +19,14 @@ class DoorService:
     LED_IO = 18
     LED_HEARTBEAT_TIMES = (0.1, 5) # on, off time in seconds
     LED_DOOR_OPEN_TIMES = (0.25, 0.25)
+    LED_MAGIC_TAG_TIMES = (0.1, 0.1)
     led_last_time = 0
+    MAGIC_TAGS = {"88046609": "init_tag",      # 4-byte UIDs of "magic" tags that cause the doord to perform actions
+                  "b": "init_tag_safe", # NEVER set this one
+                  "88046509": "pull_db"}
+    MAGIC_TAG_TIMEOUT = 10 #seconds
+    DEFAULT_SECTOR_A = 1
+    DEFAULT_SECTOR_B = 2
     FRIEND = 1
     TRUSTEE = 2
     SUPPORTER = 3
@@ -56,6 +63,10 @@ class DoorService:
                 (status,uid) = self.nfc.MFRC522_Anticoll()
                 if status == self.nfc.MI_OK:
                     tag = Tag(uid, self.nfc, self.db)
+                    if (str(tag)) in self.MAGIC_TAGS:
+                        self.magic_tag(self.MAGIC_TAGS[str(tag)])
+                        continue
+
                     if self.recent_tags.has_key(str(tag)):
                         if self.recent_tags[str(tag)] + self.DOOR_OPEN_TIME > os.times()[4]:
                             del tag
@@ -88,6 +99,7 @@ class DoorService:
 
                     del tag
                     gpio.output(self.LED_IO, gpio.LOW)
+                    self.led_last_time = os.times()[4]
 
                 else:
                     print "Failed to read UID"
@@ -117,6 +129,72 @@ class DoorService:
                     gpio.output(self.LED_IO, gpio.HIGH)
                     self.led_last_time = os.times()[4]
 
+    def magic_tag(self, function):
+        if function is "init_tag":
+            self.init_tag()
+        elif function is "init_tag_safe":
+            self.init_tag(sector_keys="safe")
+        elif function is "pull_db":
+            self.db.server_poll()
+            self.last_server_poll = os.times()[4]
+
+    def init_tag(self, sector_keys="production"):
+        print "Entered tag init mode: " + str(sector_keys)
+        magic_tag_start = os.times()[4]
+
+        #get a tag
+        while True:
+            (status,TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
+
+            # is a device presented
+            if status == self.nfc.MI_OK:
+
+                # run anti-collision and let the next id fall out
+                (status,uid) = self.nfc.MFRC522_Anticoll()
+                if status == self.nfc.MI_OK:
+                    tag = Tag(uid, self.nfc, self.db)
+
+                    #is it the magic tag still?
+                    if str(tag) in self.MAGIC_TAGS:
+                        del tag
+                        continue
+
+                    print "Found tag: " + str(tag)
+                    gpio.output(self.LED_IO, gpio.HIGH)
+                    self.db.lock.acquire()
+                    try:
+                        if sector_keys is "production":
+                            tag.initialize(self.DEFAULT_SECTOR_A, self.DEFAULT_SECTOR_B)
+                        else:
+                            tag.initialize(self.DEFAULT_SECTOR_A, self.DEFAULT_SECTOR_B, sector_keys="safe")
+                    except Exception as e:
+                        print "Problem initializing tag: " + str(e)
+
+                    self.db.lock.release()
+                    gpio.output(self.LED_IO, gpio.LOW)
+                    self.led_last_time = os.times()[4]
+                    del tag
+                    return
+
+            #led blinking while waiting for a tag
+            (ledon, ledoff) = self.LED_MAGIC_TAG_TIMES
+            if gpio.input(self.LED_IO):
+                #LED on
+                if os.times()[4] > self.led_last_time + ledon:
+                    gpio.output(self.LED_IO, gpio.LOW)
+                    self.led_last_time = os.times()[4]
+            else:
+                #LED off
+                if os.times()[4] > self.led_last_time + ledoff:
+                    gpio.output(self.LED_IO, gpio.HIGH)
+                    self.led_last_time = os.times()[4]
+
+            #magic tag timeout
+            if os.times()[4] > magic_tag_start + self.MAGIC_TAG_TIMEOUT:
+                gpio.output(self.LED_IO, gpio.LOW)
+                self.led_last_time = os.times()[4]
+                return
+
 class Tag:
     uid = None
     nfc = None
@@ -128,6 +206,9 @@ class Tag:
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
     BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed
     SECTOR_LOCK_BYTES = [0x7F,0x07,0x88,0x69] #key a r/w, key b r/w/conf
+    DEFAULT_KEY = [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF] #the key locking un-written cards
+    SAFE_A_KEY = [0x6B,0x65,0x79,0x20,0x61,0x00] #safe keys used for testing "key a" in ascii
+    SAFE_B_KEY = [0x6B,0x65,0x79,0x20,0x62,0x00] #                           "key b"
 
     #create tag object representing one session with one tag
     def __init__(self, uid, nfc, db):
@@ -295,6 +376,124 @@ class Tag:
     def log_auth(self, location, result):
         self.db.log_auth(str(self), location, result)
 
+    def initialize(self, sector_a_sector, sector_b_sector, sector_keys="production"):
+        print "Generating random elements"
+        # bcrypt will reject a count padded with a null (chr(0)) character.
+        # It will also reject unicode text objects (u"hello") but not unicode
+        # characters in a regular string (b"You can't have unicode in python comments")
+        while True:
+            sector_a_secret = os.urandom(23) #23 because this matches the entropy of the bcrypt digest itself
+            if not b"\x00" in sector_a_secret:
+                break
+        while True:
+            sector_b_secret = os.urandom(23)
+            if not b"\x00" in sector_b_secret:
+                break
+
+        # Mifare keys however, may contain zeros
+        if sector_keys == "production":
+            sector_a_key_a = map(ord, os.urandom(6))
+            sector_a_key_b = map(ord, os.urandom(6))
+            sector_b_key_a = map(ord, os.urandom(6))
+            sector_b_key_b = map(ord, os.urandom(6))
+        else:
+            print "WARNING: Using safe keys, this is NOT secure, please use production keys"
+            sector_a_key_a = self.SAFE_A_KEY
+            sector_a_key_b = self.SAFE_B_KEY
+            sector_b_key_a = self.SAFE_A_KEY
+            sector_b_key_b = self.SAFE_B_KEY
+
+        # if this failes anywhere we should remember the sector keys used
+        # so we can recover the tag
+        try:
+            print "Writing sector a: " + str(sector_a_sector)
+            self.write_sector(sector_a_sector,
+                              self.DEFAULT_KEY,
+                              self.nfc.PICC_AUTHENT1A,
+                              sector_a_secret,
+                              0)
+            print "Writing sector b: " + str(sector_b_sector)
+            self.write_sector(sector_b_sector,
+                              self.DEFAULT_KEY,
+                              self.nfc.PICC_AUTHENT1A,
+                              sector_b_secret,
+                              1)
+            print "Readback sectors"
+            sector_a_backdata = self.read_sector(sector_a_sector,
+                                                 self.DEFAULT_KEY,
+                                                 self.nfc.PICC_AUTHENT1A)
+            readback_a = self.validate_sector(sector_a_backdata,
+                                              sector_a_secret)
+            if readback_a != 0:
+                raise TagException("Sector a: " + str(sector_a_sector) + ", readback count incorect")
+
+            sector_b_backdata = self.read_sector(sector_b_sector,
+                                                 self.DEFAULT_KEY,
+                                                 self.nfc.PICC_AUTHENT1A)
+            readback_b = self.validate_sector(sector_b_backdata,
+                                              sector_b_secret)
+            if readback_b != 1:
+                raise TagException("Sector b: " + str(sector_b_sector) + ", readback count incorrect")
+
+            print "Securing sectors"
+            self.configure_sector(sector_a_sector,
+                                  self.DEFAULT_KEY,
+                                  self.nfc.PICC_AUTHENT1A,
+                                  sector_a_key_a,
+                                  self.SECTOR_LOCK_BYTES,
+                                  sector_a_key_b)
+            self.configure_sector(sector_b_sector,
+                                  self.DEFAULT_KEY,
+                                  self.nfc.PICC_AUTHENT1A,
+                                  sector_b_key_a,
+                                  self.SECTOR_LOCK_BYTES,
+                                  sector_b_key_b)
+
+            print "Readback sectors"
+            sector_a_backdata = self.read_sector(sector_a_sector,
+                                                 sector_a_key_b,
+                                                 self.nfc.PICC_AUTHENT1B)
+            readback_a = self.validate_sector(sector_a_backdata,
+                                              sector_a_secret)
+            if readback_a != 0:
+                raise TagException("Sector a: " + str(sector_a_sector) + ", readback count incorect")
+
+            sector_b_backdata = self.read_sector(sector_b_sector,
+                                                 sector_b_key_b,
+                                                 self.nfc.PICC_AUTHENT1B)
+            readback_b = self.validate_sector(sector_b_backdata,
+                                              sector_b_secret)
+            if readback_b != 1:
+                raise TagException("Sector b: " + str(sector_b_sector) + ", readback count incorrect")
+
+            print "Sending tag details to server"
+            self.db.set_tag_user(str(self), None)
+            self.db.set_tag_count(str(self), 1)
+            self.db.set_tag_sector_a_sector(str(self), sector_a_sector)
+            self.db.set_tag_sector_b_sector(str(self), sector_b_sector)
+            self.db.set_tag_sector_a_secret(str(self), sector_a_secret)
+            self.db.set_tag_sector_b_secret(str(self), sector_b_secret)
+            self.db.set_tag_sector_a_key_a(str(self), sector_a_key_a)
+            self.db.set_tag_sector_a_key_b(str(self), sector_a_key_b)
+            self.db.set_tag_sector_b_key_a(str(self), sector_b_key_a)
+            self.db.set_tag_sector_b_key_b(str(self), sector_b_key_b)
+            self.db.server_push_now()
+        except Exception as e:
+            print "sector a (" + str(sector_a_sector) + "):"
+            print "  key a: " + str(sector_a_key_a)
+            print "  key b: " + str(sector_a_key_b)
+            print "sector b (" + str(sector_b_sector) + "):"
+            print "  key a: " + str(sector_b_key_a)
+            print "  key b: " + str(sector_b_key_b)
+            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            print "FAILED TO WRITE TAG or UPDATE SERVER - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!"
+            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+            #make doubly sure this gets logged
+            syslog.syslog("doord: Failed to init a tag, keys attempted were: sector a (1): key a: " + str(sector_a_key_a) + " key b: " + str(sector_a_key_b) + " sector b (2): key a: " + str(sector_b_key_a) + "  key b: " + str(sector_b_key_b))
+            raise
+
+        print "Successfully initialized tag"
+
     #return a validated count stored in the sector data given or False
     def validate_sector(self, sector_data, secret):
         #Assert crc16 matches sector or log corrupt sector and return
@@ -375,13 +574,13 @@ class Tag:
 
     def configure_sector(self, sector, key, keyspec, key_a, lock_bytes, key_b):
         status = self.nfc.Auth_Sector(keyspec, sector, key, self.uid)
-        if status != nfc.MI_OK:
+        if status != self.nfc.MI_OK:
             raise TagException("Failed to authenticate sector " + str(sector) + " of Tag " + str(self))
         data = []
         data.extend(key_a)
         data.extend(lock_bytes)
         data.extend(key_b)
-        (status, backData) = nfc.Write_Block(sector * 4 + 3, data)
+        (status, backData) = self.nfc.Write_Block(sector * 4 + 3, data)
         if (status != self.nfc.MI_OK):
             raise TagException("Failed to write sector " + str(sector) + " block " + str(sector * 4 + 3) + " of Tag " + str(self))
 
@@ -793,24 +992,39 @@ class EntryDatabaseException(Exception):
 #initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
 if len(sys.argv) > 1:
     if sys.argv[1] != "safe" and sys.argv[1] != "init":
-        print "python doord.py [init|safe|help]"
+        print "python doord.py [init|safe [sector_a_sector] [sector_b_sector]|help]"
         print ""
         print "The door authentiction server, runs as a deamon with no arguments."
         print "Put the server url and api_key in the doorrc file."
         print "    init - Initialise a tag and add it to thre server."
         print "    safe - Initialise a tag with well known keys ('key a' and"
         print "           'key b', big endian ASCII encoded)."
+        print "           Optionally include sectors of the tag to initialise."
         print "    help - Show this help document."
         sys.exit(2)
 
     nfc = MFRC522.MFRC522()
     db = EntryDatabase()
     if sys.argv[1] == "init":
-        print "Initing tag with production keys"
+        print "Initializing tag with production keys"
     else:
-        print "Initing tag with well known keys \"key a\" and \"key b\""
+        print "Initializing tag with well known keys \"key a\" and \"key b\""
+        print "WARNING: using well konnw keys is NOT secure, please use production keys."
     print "Present tag.."
     status = nfc.MI_NOTAGERR
+
+    sector_a_sector = 1
+    try:
+        if type(sys.argv[2]) is int:
+            sector_a_sector = sys.argv[2]
+    except IndexError:
+        pass
+    sector_b_sector = 2
+    try:
+        if type(sys.argv[3]) is int:
+            sector_b_sectpr = sys.argv[3]
+    except IndexError:
+        pass
 
     # wait for an nfc device to be presented
     while status != nfc.MI_OK:
@@ -822,115 +1036,10 @@ if len(sys.argv) > 1:
         tag = Tag(uid, nfc, db)
         print "Found tag UID: " + str(tag)
 
-        # bcrypt will reject a count padded with a null (chr(0)) character.
-        # It will also reject unicode text objects (u"hello") but not unicode
-        # characters in a regular string (b"You can't have unicode in python comments")
-        while True:
-            sector_a_secret = os.urandom(23) #23 because this matches the entropy of the bcrypt digest itself
-            if not b"\x00" in sector_a_secret:
-                break
-        while True:
-            sector_b_secret = os.urandom(23)
-            if not b"\x00" in sector_b_secret:
-                break
-        default_key = [0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]
-        default_keyspec = nfc.PICC_AUTHENT1A
-        # Mifare keys may contain zeros
         if sys.argv[1] == "init":
-            sector_a_key_a = map(ord, os.urandom(6))
-            sector_a_key_b = map(ord, os.urandom(6))
-            sector_b_key_a = map(ord, os.urandom(6))
-            sector_b_key_b = map(ord, os.urandom(6))
+            tag.initialize(sector_a_sector, sector_b_sector)
         else:
-            #use well known keys for testing
-            sector_a_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
-            sector_a_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-            sector_b_key_a = [0x6B,0x65,0x79,0x20,0x61,0x00]
-            sector_b_key_b = [0x6B,0x65,0x79,0x20,0x62,0x00]
-
-        try:
-            print "Writing sector 1"
-            tag.write_sector(1,
-                             default_key,
-                             default_keyspec,
-                             sector_a_secret,
-                             0)
-            print "Writing sector 2"
-            tag.write_sector(2,
-                             default_key,
-                             default_keyspec,
-                             sector_b_secret,
-                             1)
-            print "Readback sectors"
-            sector_a_backdata = tag.read_sector(1,
-                                                default_key,
-                                                default_keyspec)
-            readback_a = tag.validate_sector(sector_a_backdata,
-                                             sector_a_secret)
-            if readback_a != 0:
-                raise Exception("sector a (1) readback not correct.")
-
-            sector_b_backdata = tag.read_sector(2,
-                                                default_key,
-                                                default_keyspec)
-            readback_b = tag.validate_sector(sector_b_backdata,
-                                             sector_b_secret)
-            if readback_b != 1:
-                raise  Exception("sector b (2) readback not correct.")
-
-            print "Securing sectors"
-            tag.configure_sector(1, default_key, default_keyspec, sector_a_key_a, tag.SECTOR_LOCK_BYTES, sector_a_key_b)
-            tag.configure_sector(2, default_key, default_keyspec, sector_b_key_a, tag.SECTOR_LOCK_BYTES, sector_b_key_b)
-
-            print "Readback sectors"
-            sector_a_backdata = tag.read_sector(1,
-                                                sector_a_key_a,
-                                                default_keyspec)
-            readback_a = tag.validate_sector(sector_a_backdata,
-                                             sector_a_secret)
-            if readback_a != 0:
-                raise Exception("sector a (1) readback not correct.")
-
-            sector_b_backdata = tag.read_sector(2,
-                                                sector_b_key_a,
-                                                default_keyspec)
-            readback_b = tag.validate_sector(sector_b_backdata,
-                                             sector_b_secret)
-            if readback_b != 1:
-                raise Exception("sector b (2) readback not correct.")
-
-            print "Sending tag details to server."
-            db.lock.acquire()
-            db.set_tag_user(str(tag), None)
-            db.set_tag_count(str(tag), 1)
-            db.set_tag_sector_a_sector(str(tag), 1)
-            db.set_tag_sector_b_sector(str(tag), 2)
-            db.set_tag_sector_a_secret(str(tag), sector_a_secret)
-            db.set_tag_sector_b_secret(str(tag), sector_b_secret)
-            db.set_tag_sector_a_key_a(str(tag), sector_a_key_a)
-            db.set_tag_sector_a_key_b(str(tag), sector_a_key_b)
-            db.set_tag_sector_b_key_a(str(tag), sector_b_key_a)
-            db.set_tag_sector_b_key_b(str(tag), sector_b_key_b)
-            try:
-                db.server_push_now()
-            except EntryDatabaseException as e:
-                raise
-            db.lock.release()
-            print "Success."
-
-        except Exception as e:
-            print "sector a (1):"
-            print "  key a: " + str(sector_a_key_a)
-            print "  key b: " + str(sector_a_key_b)
-            print "sector b (2):"
-            print "  key a: " + str(sector_b_key_a)
-            print "  key b: " + str(sector_b_key_b)
-            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-            print "FAILED TO WRITE TAG or UPDATE SERVER - WRITE DOWN THE KEYS SHOWN ABOVE AND STICK THEM TO THE TAG RIGHT NOW!!!!"
-            print "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-            #make doubly sure this gets logged
-            syslog.syslog("doord: Failed to init a tag, keys attempted were: sector a (1): key a: " + str(sector_a_key_a) + " key b: " + str(sector_a_key_b) + " sector b (2): key a: " + str(sector_b_key_a) + "  key b: " + str(sector_b_key_b))
-            raise
+            tag.initialize(sector_a_sector, sector_b_sector, sector_keys="safe")
 
         sys.exit(0)
 
