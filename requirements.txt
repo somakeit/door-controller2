@@ -1,4 +1,5 @@
 crc16
 bcrypt
-requests
+requests[security]
 spidev
+RPi.GPIO>=0.5
