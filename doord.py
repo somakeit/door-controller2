@@ -671,6 +671,7 @@ class EntryDatabase:
         try:
             response = requests.get(self.server_url, cookies={'SECRET': self.api_key})
             if response.status_code == requests.codes.ok:
+                self.local.clear()
                 self.local.update(json.loads(response.text))
             else:
                 raise EntryDatabaseException("Server returned bad status to GET: " + str(response.status_code) + " - " + str(response.text))
@@ -726,7 +727,11 @@ class EntryDatabase:
         try:
             response = requests.get(self.server_url, cookies={'SECRET': self.api_key})
             if response.status_code == requests.codes.ok:
-                r_local = json.loads(response.text)
+                self.lock.acquire()
+                #avoid re-declaring local as dict, small chance of a tag being read as alien here then working very soon after
+                self.local.clear()
+                self.local.update(json.loads(response.text))
+                self.lock.release()
             else:
                 print "Server returned bad status to GET: " + str(response.status_code)
         except requests.exceptions.RequestException as e:
