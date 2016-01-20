@@ -658,9 +658,17 @@ class EntryDatabase:
         self.server_url = settings['server_url']
         self.api_key = settings['api_key']
 
-        # pull server copy down, if this initial load fails we will exit and let systemd respawn us
-        print "Connecting to " + self.server_url
-        self.server_pull_now()
+        # pull server copy down, retry forever here as we can do nothing
+        # until we have the db.
+        connected = False
+        while not connected:
+            print "Connecting to " + self.server_url
+            try:
+                self.server_pull_now()
+                connected = True
+            except EntryDatabaseException as e:
+                print "Error connecting to server: " + str(e)
+                time.sleep(60)
 
     def __del__(self):
         if type(self.proc) is Process and self.proc.is_alive():
