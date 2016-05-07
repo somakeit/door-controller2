@@ -1,0 +1,2 @@
+class GPIO():
+    pass

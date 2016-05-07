@@ -1,0 +1,4 @@
+pytest
+crc16
+bcrypt
+requests

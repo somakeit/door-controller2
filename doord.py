@@ -1002,59 +1002,60 @@ class EntryDatabase:
 class EntryDatabaseException(Exception):
     pass
 
-#initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
-if len(sys.argv) > 1:
-    if sys.argv[1] != "safe" and sys.argv[1] != "init":
-        print "python doord.py [init|safe [sector_a_sector] [sector_b_sector]|help]"
-        print ""
-        print "The door authentiction server, runs as a deamon with no arguments."
-        print "Put the server url and api_key in the doorrc file."
-        print "    init - Initialise a tag and add it to thre server."
-        print "    safe - Initialise a tag with well known keys ('key a' and"
-        print "           'key b', big endian ASCII encoded)."
-        print "           Optionally include sectors of the tag to initialise."
-        print "    help - Show this help document."
-        sys.exit(2)
-
-    nfc = MFRC522.MFRC522()
-    db = EntryDatabase()
-    if sys.argv[1] == "init":
-        print "Initializing tag with production keys"
-    else:
-        print "Initializing tag with well known keys \"key a\" and \"key b\""
-        print "WARNING: using well konnw keys is NOT secure, please use production keys."
-    print "Present tag.."
-    status = nfc.MI_NOTAGERR
-
-    sector_a_sector = 1
-    try:
-        if type(sys.argv[2]) is int:
-            sector_a_sector = sys.argv[2]
-    except IndexError:
-        pass
-    sector_b_sector = 2
-    try:
-        if type(sys.argv[3]) is int:
-            sector_b_sectpr = sys.argv[3]
-    except IndexError:
-        pass
-
-    # wait for an nfc device to be presented
-    while status != nfc.MI_OK:
-        (status,TagType) = nfc.MFRC522_Request(nfc.PICC_REQIDL)
-    print "NFC device presented"
-
-    (status,uid) = nfc.MFRC522_Anticoll()
-    if status == nfc.MI_OK:
-        tag = Tag(uid, nfc, db)
-        print "Found tag UID: " + str(tag)
-
+if __name__ == '__main__':
+    #initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
+    if len(sys.argv) > 1:
+        if sys.argv[1] != "safe" and sys.argv[1] != "init":
+            print "python doord.py [init|safe [sector_a_sector] [sector_b_sector]|help]"
+            print ""
+            print "The door authentiction server, runs as a deamon with no arguments."
+            print "Put the server url and api_key in the doorrc file."
+            print "    init - Initialise a tag and add it to thre server."
+            print "    safe - Initialise a tag with well known keys ('key a' and"
+            print "           'key b', big endian ASCII encoded)."
+            print "           Optionally include sectors of the tag to initialise."
+            print "    help - Show this help document."
+            sys.exit(2)
+    
+        nfc = MFRC522.MFRC522()
+        db = EntryDatabase()
         if sys.argv[1] == "init":
-            tag.initialize(sector_a_sector, sector_b_sector)
+            print "Initializing tag with production keys"
         else:
-            tag.initialize(sector_a_sector, sector_b_sector, sector_keys="safe")
-
-        sys.exit(0)
-
-inst = DoorService()
-inst.main()
+            print "Initializing tag with well known keys \"key a\" and \"key b\""
+            print "WARNING: using well konnw keys is NOT secure, please use production keys."
+        print "Present tag.."
+        status = nfc.MI_NOTAGERR
+    
+        sector_a_sector = 1
+        try:
+            if type(sys.argv[2]) is int:
+                sector_a_sector = sys.argv[2]
+        except IndexError:
+            pass
+        sector_b_sector = 2
+        try:
+            if type(sys.argv[3]) is int:
+                sector_b_sectpr = sys.argv[3]
+        except IndexError:
+            pass
+    
+        # wait for an nfc device to be presented
+        while status != nfc.MI_OK:
+            (status,TagType) = nfc.MFRC522_Request(nfc.PICC_REQIDL)
+        print "NFC device presented"
+    
+        (status,uid) = nfc.MFRC522_Anticoll()
+        if status == nfc.MI_OK:
+            tag = Tag(uid, nfc, db)
+            print "Found tag UID: " + str(tag)
+    
+            if sys.argv[1] == "init":
+                tag.initialize(sector_a_sector, sector_b_sector)
+            else:
+                tag.initialize(sector_a_sector, sector_b_sector, sector_keys="safe")
+    
+            sys.exit(0)
+    
+    inst = DoorService()
+    inst.main()
