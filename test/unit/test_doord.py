@@ -14,6 +14,41 @@ sys.path.append(os.getcwd())
 sys.modules['MFRC522'] = __import__('mock_MFRC522')
 sys.modules['RPi'] = __import__('mock_RPi')
 import doord
+import MFRC522
+
+class TestTag(unittest.TestCase):
+
+    #Mock patch does not like the mocked stub module at all, fiddle with the stub instead
+    def setUp(self):#, mock_select):
+        self.nfc = MFRC522.MFRC522()
+        self.tag = doord.Tag([0xfe, 0xdc, 0xba, 0x98], self.nfc, None)
+
+    def tearDown(self):
+        del(self.tag)
+        del(self.nfc)
+
+    def test_read_sector(self):#, mock_auth):
+        self.nfc.call_history = []
+        self.nfc.sector_content = self.nfc.DEFAULT_SECTOR_CONTENT
+        backdata = self.tag.read_sector(1, [1,2,3,4,5,6], 'a keyspec')
+        assert len(self.nfc.call_history) == 2
+        assert self.nfc.call_history[0]['method'] == 'Auth_Sector'
+        assert self.nfc.call_history[0]['sector'] == 1
+        assert self.nfc.call_history[0]['keyspec'] == 'a keyspec'
+        assert self.nfc.call_history[1]['method'] == 'Read_Sector'
+        assert self.nfc.call_history[1]['sector'] == 1
+        assert backdata == self.nfc.DEFAULT_SECTOR_CONTENT
+
+    def test_configure_sector(self):
+        self.nfc.call_history = []
+        self.tag.configure_sector(1, [1,2,3,4,5,6], 'a keyspec', [1,2,3,4,5,6], self.tag.SECTOR_LOCK_BYTES, [6,5,4,3,2,1])
+        assert len(self.nfc.call_history) == 2
+        assert self.nfc.call_history[0]['method'] == 'Auth_Sector'
+        assert self.nfc.call_history[0]['sector'] == 1
+        assert self.nfc.call_history[0]['keyspec'] == 'a keyspec'
+        assert self.nfc.call_history[1]['method'] == 'Write_Block'
+        assert self.nfc.call_history[1]['block'] == 7
+        assert self.nfc.call_history[1]['block_content'] == [1,2,3,4,5,6] + self.tag.SECTOR_LOCK_BYTES + [6,5,4,3,2,1]
 
 class TestTagStatic(unittest.TestCase):
 
