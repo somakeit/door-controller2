@@ -59,6 +59,16 @@ class TestTagStatic(unittest.TestCase):
         assert self.tag.less_than(0, 32768) == False
         assert self.tag.less_than(0, 32767) == True
 
+    def test_encode_bcrypt64(self):
+        assert self.tag.encode_bcrypt64('EAFsows8RLtDDZwP3wYfBuUMMeWL6lSp2kswfRuzNSavepq7uAZ.m') == \
+            [134, 112, 184, 170, 236, 250, 83, 243, 22, 197, 38, 71, 185, 172, 133, 3, 108, 57, 14, 136,
+            53, 252, 73, 173, 184, 233, 202, 225, 4, 215, 15, 197, 197, 224, 202, 246, 176, 176, 1, 40]
+
+    def test_unencode_bcrypt64(self):
+        assert self.tag.unencode_bcrypt64([134, 112, 184, 170, 236, 250, 83, 243, 22, 197, 38, 71, 185,
+        172, 133, 3, 108, 57, 14, 136, 53, 252, 73, 173, 184, 233, 202, 225, 4, 215, 15, 197, 197, 224,
+        202, 246, 176, 176, 1, 40]) == 'EAFsows8RLtDDZwP3wYfBuUMMeWL6lSp2kswfRuzNSavepq7uAZ.m'
+
 class TestEntryDatabaseStatic(unittest.TestCase):
 
     @mock.patch('doord.EntryDatabase.__init__')
