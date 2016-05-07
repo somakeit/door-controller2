@@ -1,2 +1,4 @@
 class MFRC522():
-    pass
+
+    def MFRC522_StopCrypto1(self):
+        pass
