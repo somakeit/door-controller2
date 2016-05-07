@@ -715,13 +715,13 @@ class EntryDatabase:
 
             #try to send all the updates in order
             try:
-                for i in range(len(self.send_queue)):
+                while len(self.send_queue) > 0:
                     response = requests.post(self.server_url,
                                              cookies={'SECRET': self.api_key},
-                                             data = json.dumps(self.send_queue[i]),
+                                             data = json.dumps(self.send_queue[0]),
                                              headers={'content-type': 'application/json'})
                     if response.status_code == requests.codes.ok:
-                        self.send_queue.pop(i)
+                        self.send_queue.pop(0)
                     else:
                         #there is nobody to catch anything thrown here
                         print "Server returned bad status to POST:" + str(response.status_code) + " (send_queue: " + str(len(self.send_queue)) + ")"
@@ -729,7 +729,7 @@ class EntryDatabase:
                         #do not continue to push send_queue on a failure, it may deliver out of order
                         return
             except requests.exceptions.RequestException as e:
-                print "POST request error: " + str(e) + " - " + str(response.text) + " (send_queue: " + str(len(self.send_queue)) + ")"
+                print "POST request error: " + str(e) + " - send_queue: " + str(len(self.send_queue)) + ")"
                 #same warnings as bad status code above
                 return
 
@@ -744,7 +744,7 @@ class EntryDatabase:
             else:
                 print "Server returned bad status to GET: " + str(response.status_code)
         except requests.exceptions.RequestException as e:
-            print "GET request error: " + str(e) + " - " + str(response.text)
+            print "GET request error: " + str(e)
 
     #attempt to send unsent changes to the server and update the local copy, asynchronously
     def server_poll(self):
