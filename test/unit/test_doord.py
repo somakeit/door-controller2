@@ -4,6 +4,7 @@ import sys
 import os
 import mock
 import multiprocessing
+from multiprocessing import Process
 import base64
 import requests_mock
 import json
@@ -172,6 +173,156 @@ class TestEntryDatabase(unittest.TestCase):
         assert len(self.db.unsent.keys()) == 0
         assert len(self.db.send_queue) == 0
         assert type(self.db.unsent) == multiprocessing.managers.DictProxy    
+
+    @requests_mock.mock()
+    def test_server_poll_woker_no_updates(self, internet):
+        testdict = {u'some': u'json'}
+        assert len(self.db.local.keys()) == 0
+        internet.get('https://example.com/rfid', text=json.dumps(testdict))
+        self.db._server_poll_worker()
+        assert len(internet.request_history) == 1
+        assert internet.request_history[0]._request.method == 'GET'
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+
+    @requests_mock.mock()
+    def test_server_poll_worker_update(self, internet):
+        testdict = {u'some': u'json'}
+        testdict2 = {u'some more': u'json'}
+        self.db.local.update(testdict)
+        self.db.unsent.update(testdict)
+        internet.post('https://example.com/rfid', text='OK')
+        internet.get('https://example.com/rfid', text=json.dumps(testdict2))
+        self.db._server_poll_worker()
+        assert len(internet.request_history) == 2
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert internet.request_history[1]._request.method == 'GET'
+        assert internet.request_history[1]._request.headers['Cookie'] == 'SECRET=lol'
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+        #This also tests a changing db on the server
+        assert dict(self.db.local) == testdict2
+        
+    @requests_mock.mock()
+    def test_server_poll_worker_update_retry(self, internet):
+        testdict0 = {u'the first': 'json'}
+        testdict = {u'some': u'json'}
+        testdict2 = {u'some more': u'json'}
+        self.db.send_queue.append(testdict0)
+        self.db.local.update(testdict)
+        self.db.unsent.update(testdict)
+        internet.post('https://example.com/rfid', text='OK')
+        internet.get('https://example.com/rfid', text=json.dumps(testdict2))
+        self.db._server_poll_worker()
+        assert len(internet.request_history) == 3
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict0
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert internet.request_history[1]._request.method == 'POST'
+        assert json.loads(internet.request_history[1].text) == testdict
+        assert internet.request_history[1]._request.headers['Cookie'] == 'SECRET=lol'
+        assert internet.request_history[2]._request.method == 'GET'
+        assert internet.request_history[2]._request.headers['Cookie'] == 'SECRET=lol'
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+        #This also tests a changing db on the server
+        assert dict(self.db.local) == testdict2
+
+    @requests_mock.mock()
+    def test_server_poll_worker_error_post(self, internet):
+        testdict = {u'some': u'json'}
+        self.db.unsent.update(testdict)
+        internet.post('https://example.com/rfid', text='BAD', status_code=404)
+        self.db._server_poll_worker()
+        assert len(internet.request_history) == 1
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+        assert len(self.db.send_queue) == 1
+        assert self.db.send_queue[0] == testdict
+
+    @requests_mock.mock()
+    def test_server_poll_worker_error_get(self, internet):
+        testdict = {u'some': u'json'}
+        testdict2 = {u'some more': u'json'}
+        self.db.local.update(testdict)
+        self.db.unsent.update(testdict)
+        internet.post('https://example.com/rfid', text='OK')
+        internet.get('https://example.com/rfid', text='BAD', status_code=500)
+        self.db._server_poll_worker()
+        assert len(internet.request_history) == 2
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert internet.request_history[1]._request.method == 'GET'
+        assert internet.request_history[1]._request.headers['Cookie'] == 'SECRET=lol'
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+        assert dict(self.db.local) == testdict
+
+    @mock.patch('requests.post')
+    def test_server_poll_worker_fail_post(self, mock_post):
+        testdict = {u'some': u'json'}
+        self.db.unsent.update(testdict)
+        mock_post.side_effect = requests.exceptions.RequestException('Like maybe cert was expired')
+        self.db._server_poll_worker()
+        assert mock_post.called
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+        assert len(self.db.send_queue) == 1
+        assert self.db.send_queue[0] == testdict
+
+    @requests_mock.mock()
+    @mock.patch('requests.get')
+    def test_server_poll_worker_fail_get(self, internet, mock_get):
+        testdict = {u'some': u'json'}
+        testdict2 = {u'some more': u'json'}
+        self.db.local.update(testdict)
+        self.db.unsent.update(testdict)
+        internet.post('https://example.com/rfid', text='OK')
+        mock_get.side_effect = requests.exceptions.RequestException('Like the internet is on fire')
+        self.db._server_poll_worker()
+        assert len(internet.request_history) == 1
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert mock_get.called
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+        assert dict(self.db.local) == testdict
+
+    @mock.patch('multiprocessing.Process.__init__')
+    @mock.patch('multiprocessing.Process.start')
+    @mock.patch('multiprocessing.Process.is_alive')
+    def test_server_poll_launcher_first(self, mock_proc_alive, mock_proc_start, mock_proc_init):
+        mock_proc_init.return_value = None
+        mock_proc_start.return_value = None
+        self.db.server_poll()
+        assert mock_proc_start.called
+
+    @mock.patch('multiprocessing.Process.start')
+    @mock.patch('multiprocessing.Process.is_alive')
+    def test_server_poll_launcher_subsequent(self, mock_proc_alive, mock_proc_start):
+        self.db.proc = multiprocessing.Process(target = self.db._server_poll_worker)
+        mock_proc_start.return_value = None
+        mock_proc_alive.return_value = False
+        with mock.patch.object(multiprocessing.Process, '__init__', return_value=None) as mock_proc_init:
+            self.db.server_poll()
+        assert mock_proc_start.called
+
+    @mock.patch('multiprocessing.Process.start')
+    @mock.patch('multiprocessing.Process.is_alive')
+    def test_server_poll_launcher_already_running(self, mock_proc_alive, mock_proc_start):
+        self.db.proc = multiprocessing.Process(target = self.db._server_poll_worker)
+        mock_proc_start.return_value = None
+        mock_proc_alive.return_value = True
+        with mock.patch.object(Process, '__init__', return_value=None) as mock_proc_init:
+            self.db.server_poll()
+        mock_proc_start.assert_not_called()
 
     def test_tag_user(self):
         assert len(self.db.unsent.keys()) == 0
