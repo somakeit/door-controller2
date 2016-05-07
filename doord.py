@@ -635,16 +635,17 @@ class TagException(Exception):
     pass
 
 class EntryDatabase:
-    proc = None
-    mgr = Manager()
-    lock = Lock()
-    local = mgr.dict() #shared objects
-    unsent = mgr.dict() #updates we've never tried to send
-    send_queue = mgr.list() #list uf updates we're trying to send in order
-    server_url = None
-    api_key = None
 
     def __init__(self):
+        self.proc = None
+        self.mgr = Manager()
+        self.lock = Lock()
+        self.local = self.mgr.dict() #shared objects
+        self.unsent = self.mgr.dict() #updates we've never tried to send
+        self.send_queue = self.mgr.list() #list uf updates we're trying to send in order
+        self.server_url = None
+        self.api_key = None
+
         # load settings
         try:
             rcfile = open('doorrc', 'r')
