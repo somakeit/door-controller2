@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/somakeit/door-controller2.svg?branch=master)](https://travis-ci.org/somakeit/door-controller2)
 # door-controller2
 A new door controller for a new space, where all the previous hardware is broken and we can't replace it.
 
