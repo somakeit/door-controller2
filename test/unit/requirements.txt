@@ -1,4 +1,5 @@
 pytest
 crc16
 bcrypt
-requests
+requests[security]
+requests_mock

@@ -5,6 +5,9 @@ import os
 import mock
 import multiprocessing
 import base64
+import requests_mock
+import json
+import requests.exceptions
 
 sys.path.append(os.getcwd())
 sys.modules['MFRC522'] = __import__('mock_MFRC522')
@@ -79,15 +82,12 @@ class TestEntryDatabaseStatic(unittest.TestCase):
         assert testdict['key_a']['key_ab'] == 'must not squash'
         assert testdict['key_b'] == 'also must not squash'
 
-    def test_server_pull_now(self):
-        pass #TODO
-
 class TestEntryDatabase(unittest.TestCase):
 
     @mock.patch('doord.EntryDatabase.server_pull_now')
     def setUp(self, mock_server_pull_now):
         f = open('doorrc', 'w')
-        f.write('{"api_key": "lol", "server_url": "https://example.com"}')
+        f.write('{"api_key": "lol", "server_url": "https://example.com/rfid"}')
         f.close()
 
         mock_server_pull_now.return_value = None
@@ -100,6 +100,78 @@ class TestEntryDatabase(unittest.TestCase):
             os.remove('doorrc')
         except:
             pass
+
+    @requests_mock.mock()
+    def test_server_pull_now(self, internet):
+        testdict = {u'some': u'json'}
+        assert len(self.db.local.keys()) == 0
+        internet.get('https://example.com/rfid', text=json.dumps(testdict))
+        self.db.server_pull_now()
+        assert internet.request_history[0]._request.headers['Cookie'] == 'SECRET=lol'
+        assert type(self.db.local) == multiprocessing.managers.DictProxy
+        assert dict(self.db.local) == testdict
+
+    @mock.patch('requests.get')
+    def test_server_pull_now_error(self, mock_get):
+        mock_get.side_effect = requests.exceptions.RequestException('Like a timeout or something')
+        try:
+            self.db.server_pull_now()
+            assert False
+        except doord.EntryDatabaseException:
+            pass
+    
+    @requests_mock.mock()
+    def test_server_pull_now_bad_status(self, internet):
+        internet.get('https://example.com/rfid', text='Go away', status_code='403')
+        try:
+            self.db.server_pull_now()
+            assert False
+        except doord.EntryDatabaseException:
+            pass
+
+    @requests_mock.mock()
+    def test_server_push_now(self, internet):
+        assert len(self.db.send_queue) == 0
+        internet.post('https://example.com/rfid', text='OK')
+        testdict = {u'some': u'dict'}
+        self.db.unsent.update(testdict)
+        self.db.server_push_now()
+        assert len(internet.request_history) == 1
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict
+        assert len(self.db.unsent.keys()) == 0
+        assert len(self.db.send_queue) == 0
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+
+    @requests_mock.mock()
+    def test_server_push_now_bad_status(self, internet):
+        assert len(self.db.send_queue) == 0
+        internet.post('https://example.com/rfid', text='BAD', status_code=400)
+        testdict = {u'some': u'dict'}
+        self.db.unsent.update(testdict)
+        try:
+            self.db.server_push_now()
+            assert False
+        except doord.EntryDatabaseException:
+            pass
+        assert len(internet.request_history) == 1
+        assert internet.request_history[0]._request.method == 'POST'
+        assert json.loads(internet.request_history[0].text) == testdict
+        assert len(self.db.unsent.keys()) == 0
+        assert len(self.db.send_queue) == 1
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
+
+    @requests_mock.mock()
+    def test_server_push_now_retry(self, internet):
+        testdict = {u'some': u'dict'}
+        self.db.send_queue.append(testdict)
+        internet.post('https://example.com/rfid', text='OK')
+        self.db.unsent.update(testdict)
+        self.db.server_push_now()
+        assert len(internet.request_history) == 2
+        assert len(self.db.unsent.keys()) == 0
+        assert len(self.db.send_queue) == 0
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy    
 
     def test_tag_user(self):
         assert len(self.db.unsent.keys()) == 0
