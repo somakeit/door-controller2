@@ -196,12 +196,6 @@ class DoorService:
                 return
 
 class Tag:
-    uid = None
-    nfc = None
-    db = None
-    count = None    #the correct count
-    count_a = None  #counts read from tag
-    count_b = None
     BCRYPT_BASE64_DICT = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
     BCRYPT_VERSION = ['2', '2a', '2b', '2y']
     BCRYPT_COST = 8    #tuned for performance, we must hash 4 times per authentication, this could be reduced to 3 if needed
@@ -212,6 +206,9 @@ class Tag:
 
     #create tag object representing one session with one tag
     def __init__(self, uid, nfc, db):
+        self.count = None    #the correct count
+        self.count_a = None  #counts read from tag
+        self.count_b = None
         self.uid = uid
         self.nfc = nfc
         self.db = db
