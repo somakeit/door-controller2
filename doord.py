@@ -693,15 +693,15 @@ class EntryDatabase:
         self.unsent.clear()
 
         try:
-            for i in range(len(self.send_queue)):
+            while len(self.send_queue) > 0:
                 response = requests.post(self.server_url,
                                          cookies={'SECRET': self.api_key},
-                                         data = json.dumps(self.send_queue[i]),
+                                         data = json.dumps(self.send_queue[0]),
                                          headers={'content-type': 'application/json'})
-            if response.status_code == requests.codes.ok:
-                self.send_queue.pop(i)
-            else:
-                raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code) + " - " + str(response.text)) + " (send_queue: " + str(len(self.send_queue)) + ")"
+                if response.status_code == requests.codes.ok:
+                    self.send_queue.pop(0)
+                else:
+                    raise EntryDatabaseException("Server returned bad status to POST:" + str(response.status_code) + " - " + str(response.text) + " (send_queue: " + str(len(self.send_queue)) + ")")
         except requests.exceptions.RequestException as e:
             raise EntryDatabaseException("POST request error: " + str(e)) + " (send_queue: " + str(len(self.send_queue)) + ")"
 
