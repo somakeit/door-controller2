@@ -232,7 +232,6 @@ class Tag:
         try:
             userid = self.db.get_tag_user(str(self))
         except EntryDatabaseException as e:
-            #TESTME
             if str(e) == "Unkown tag":
                 print "Tag " + str(self) + " is alien"
             elif str(e) == "Unassigned tag":
@@ -258,13 +257,12 @@ class Tag:
         try:
             sector_a_data = self.read_sector(self.db.get_tag_sector_a_sector(str(self)),
                                              self.db.get_tag_sector_a_key_b(str(self)),
-                                             self.nfc.PICC_AUTHENT1B) #TESTME test missinig fields
+                                             self.nfc.PICC_AUTHENT1B)
 
             sector_b_data = self.read_sector(self.db.get_tag_sector_b_sector(str(self)),
                                              self.db.get_tag_sector_b_key_b(str(self)),
                                              self.nfc.PICC_AUTHENT1B)
         except TagException as e:
-            #TESTME one and both
             print "Failed to Read sector: " + str(e)
             return (False, [])
         except EntryDatabaseException as e:
@@ -295,7 +293,6 @@ class Tag:
             return (False, [])
 
         if sector_a_ok and sector_b_ok and 1 < self.subtract(self.count_a, self.count_b) < 65535: #subtract() wraps in 16-bit positive space, -1 is 65535
-            #TESTME
             print "Warning: valid sector counts spaced higher than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
         if sector_a_ok and sector_b_ok and (self.count_a == self.count_b):
             print "Warning: valid sector counts spaced lower than expected: A: " + str(self.count_a) + " B: " + str(self.count_b)
@@ -325,7 +322,6 @@ class Tag:
                 return (False, [])
 
             if readback != (self.plus(self.count_a, 1)):
-                #TESTME, maybe, it's hard
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_a, 1)) + " Got: " + str(readback)
                 return (False, [])
 
@@ -346,7 +342,7 @@ class Tag:
                 sector_a_backdata = self.read_sector(self.db.get_tag_sector_a_sector(str(self)),
                                                      self.db.get_tag_sector_a_key_b(str(self)),
                                                      self.nfc.PICC_AUTHENT1B)
-                readback = self.validate_sector(sector_a_backdata,
+                readback = self.validate_sector(sector_a_backdata,  
                                                 self.db.get_tag_sector_a_secret(str(self)))
             except TagException as e:
                 print "Failed to update tag: " + str(e)
@@ -356,7 +352,6 @@ class Tag:
                 return (False, [])
 
             if readback != (self.plus(self.count_b, 1)):
-                #TESTME, maybe, it's hard
                 print "Tag readback not correct, expected: " + str(self.plus(self.count_b, 1)) + " Got: " + str(readback)
                 return (False, [])
 
@@ -491,13 +486,12 @@ class Tag:
 
         print "Successfully initialized tag"
 
-    #return a validated count stored in the sector data given or False
+    #return a validated count stored in the sector data given or rasie exception
     def validate_sector(self, sector_data, secret):
         #Assert crc16 matches sector or log corrupt sector and return
         payload = "".join(map(chr, sector_data[0:46]))
         crc = (sector_data[46] << 8) + sector_data[47]
         if not crc16.crc16xmodem(payload) == crc:
-            #TESTME
             raise TagException("Sector data failed checksum")
 
         count = (sector_data[0] << 8) + sector_data[1]
@@ -507,21 +501,21 @@ class Tag:
         reserved = sector_data[44:46]
 
         if algorithm > (len(self.BCRYPT_VERSION) - 1):
-            #TESTME
             raise TagException("Unknown bcrypt algorithm: " + str(algorithm))
 
         for b in reserved:
             if b != 0:
-                #TESTME
                 raise TagException("Data in padding")
 
         read_hash = '$' + str(self.BCRYPT_VERSION[algorithm]) + '$' + str(cost).zfill(2) + '$' + digest
 
-        calculated_hash = bcrypt.hashpw(str(count) + str(secret), read_hash)
+        try:
+            calculated_hash = bcrypt.hashpw(str(count) + str(secret), read_hash)
+        except ValueError as e:
+            raise TagException('Failed to make hash to compare: ' + str(e))
 
         if calculated_hash != read_hash:
-            #TESTME
-            raise TagException("Hash does not match, count is not authentic.") #TESTME clone tag and make tag with bad signature
+            raise TagException("Hash does not match, count is not authentic.")
 
         return count
 

@@ -9,6 +9,7 @@ import base64
 import requests_mock
 import json
 import requests.exceptions
+import crc16
 
 sys.path.append(os.getcwd())
 sys.modules['MFRC522'] = __import__('mock_MFRC522')
@@ -24,7 +25,10 @@ class TestTag(unittest.TestCase):
         self.tag = doord.Tag([0xfe, 0xdc, 0xba, 0x98], self.nfc, None)
 
     def tearDown(self):
-        del(self.tag)
+        try:
+            del(self.tag)
+        except:
+            pass
         del(self.nfc)
 
     def test_read_sector(self):#, mock_auth):
@@ -39,6 +43,25 @@ class TestTag(unittest.TestCase):
         assert self.nfc.call_history[1]['sector'] == 1
         assert backdata == self.nfc.DEFAULT_SECTOR_CONTENT
 
+    def test_read_sector_auth_fail(self):
+        self.nfc.call_history = []
+        self.nfc.return_code = self.nfc.MI_ERR
+        try:
+            backdata = self.tag.read_sector(1, [1,2,3,4,5,6], 'a keyspec')
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 1
+
+    def test_read_sector_read_fail(self):
+        self.nfc.call_history = []
+        try:
+            backdata = self.tag.read_sector(1, [1,2,3,4,5,6], 'a keyspec')
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 2
+
     def test_configure_sector(self):
         self.nfc.call_history = []
         self.tag.configure_sector(1, [1,2,3,4,5,6], 'a keyspec', [1,2,3,4,5,6], self.tag.SECTOR_LOCK_BYTES, [6,5,4,3,2,1])
@@ -49,6 +72,1667 @@ class TestTag(unittest.TestCase):
         assert self.nfc.call_history[1]['method'] == 'Write_Block'
         assert self.nfc.call_history[1]['block'] == 7
         assert self.nfc.call_history[1]['block_content'] == [1,2,3,4,5,6] + self.tag.SECTOR_LOCK_BYTES + [6,5,4,3,2,1]
+
+    def test_configure_sector_auth_fail(self):
+        self.nfc.call_history = []
+        self.nfc.return_code = self.nfc.MI_ERR
+        try:
+            self.tag.configure_sector(1, [1,2,3,4,5,6], 'a keyspec', [1,2,3,4,5,6], self.tag.SECTOR_LOCK_BYTES, [6,5,4,3,2,1])
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 1
+
+    def test_configure_sector_write_fail(self):
+        self.nfc.call_history = []
+        self.nfc.return_code = [self.nfc.MI_OK, self.nfc.MI_ERR]
+        try:
+            self.tag.configure_sector(1, [1,2,3,4,5,6], 'a keyspec', [1,2,3,4,5,6], self.tag.SECTOR_LOCK_BYTES, [6,5,4,3,2,1])
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 2
+
+    def test_select_tag_on_init(self):
+        assert self.nfc.call_history[0]['method'] == 'MFRC522_SelectTag'
+        assert self.nfc.call_history[0]['uid'] == self.tag.uid
+
+    def test_stop_crypto_on_del(self):
+        del(self.tag)
+        assert self.nfc.call_history[-1]['method'] == 'MFRC522_StopCrypto1'
+
+    def test_get_printable_uid(self):
+        assert str(self.tag) == 'fedcba98'
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.log_auth')
+    def test_log_auth(self, mock_db_log, mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_log.return_value = None
+        self.tag.log_auth('DOOR1', 'DENIED')
+        mock_db_log.assert_called_once_with(str(self.tag), 'DOOR1', 'DENIED')
+
+    def test_write_sector(self):
+        self.nfc.call_history = []
+        self.tag.write_sector(2, [2,3,4,5,6,7],
+            'some keyspec',
+            base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg='),
+            42)
+        assert len(self.nfc.call_history) == 4
+        assert self.nfc.call_history[0]['method'] == 'Auth_Sector'
+        assert self.nfc.call_history[0]['sector'] == 2
+        assert self.nfc.call_history[1]['method'] == 'Write_Block'
+        assert self.nfc.call_history[1]['block'] == 8
+        assert self.nfc.call_history[1]['block_content'][0:2] == [0,42] #plaintext count
+        assert self.nfc.call_history[1]['block_content'][2] == 2 #bcrypt default, may change
+        assert self.nfc.call_history[1]['block_content'][3] == 8 #doord config, may be changed safely at any time
+        assert self.nfc.call_history[2]['method'] == 'Write_Block'
+        assert self.nfc.call_history[2]['block'] == 9
+        assert self.nfc.call_history[3]['method'] == 'Write_Block'
+        assert self.nfc.call_history[3]['block'] == 10
+        assert self.nfc.call_history[3]['block_content'][12:14] == [0,0] #reserved
+        assert (self.nfc.call_history[3]['block_content'][14] << 8) + \
+            self.nfc.call_history[3]['block_content'][15] == \
+            crc16.crc16xmodem("".join(map(chr, self.nfc.call_history[1]['block_content'] + \
+            self.nfc.call_history[2]['block_content'] + self.nfc.call_history[3]['block_content'][0:14]))) #crc
+        assert self.tag.validate_sector(self.nfc.call_history[1]['block_content'] + \
+            self.nfc.call_history[2]['block_content'] + \
+            self.nfc.call_history[3]['block_content'],
+            base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')) == 42 #sector validates through tested method
+
+    def test_write_sector_fail_auth(self):
+        self.nfc.call_history = []
+        self.nfc.return_code = self.nfc.MI_ERR
+        try:
+            self.tag.write_sector(2, [2,3,4,5,6,7],
+                'some keyspec',
+                base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg='),
+                42)
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 1
+
+    def test_write_sector_write_fail(self):
+        self.nfc.call_history = []
+        self.nfc.return_code = [self.nfc.MI_OK, self.nfc.MI_ERR]
+        try:
+            self.tag.write_sector(2, [2,3,4,5,6,7],
+            'some keyspec',
+            base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg='),
+            42)
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 2
+
+    def test_write_sector_later_write_fail(self):
+        self.nfc.call_history = []
+        self.nfc.return_code = [self.nfc.MI_OK, self.nfc.MI_OK, self.nfc.MI_OK, self.nfc.MI_ERR]
+        try:
+            self.tag.write_sector(2, [2,3,4,5,6,7],
+            'some keyspec',
+            base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg='),
+            42)
+            assert False
+        except doord.TagException:
+            pass
+        assert len(self.nfc.call_history) == 4
+
+    def test_validate_sector(self):
+        sector_data = [  0,  42,   2,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  68,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   0, 193, 230]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        assert self.tag.validate_sector(sector_data, secret) == 42
+
+    def test_validate_next_sector(self):
+        sector_data = [  0,  43,   2,   8,   1, 117, 110, 120,  55, 214, 130,  12,  10, 238, 159, 179,
+                        97, 166,  50,   2, 172,  23, 163,  73, 111, 116,  50, 251,   5, 182, 245,  61,
+                        42,  56,   4, 136,   6, 212,  84, 224, 181,  92,  41,  20,   0,   0, 157, 201]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        assert self.tag.validate_sector(sector_data, secret) == 43
+
+    def test_validate_checksum_error(self):
+        sector_data = [  0,  42,   2,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  69, #<- 1 bit err
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   0, 193, 230]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_count_mismatch(self):
+                             #v--- count of 41 in a 42 sector
+        sector_data = [  0,  41,   2,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  68,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   0, 193, 230]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_algorithm_mismatch(self):
+                                  #v--- different bcrypt algorithm from sector
+        sector_data = [  0,  42,   1,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  68,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   0, 193, 230]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_future_algorithm(self):
+                                #v--- unknown bcrypt algorithm
+        sector_data = [  0,  42, 222,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  68,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   0, 193, 230]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_work_factor_mismatch(self):
+                                      #v--- different bcrypt work factor from sector
+        sector_data = [  0,  42,   2,  12, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  68,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   0, 193, 230]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_corrupt_reserved_1(self):
+        sector_data = [  0,  42,   2,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  68,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   1,   0, 193, 230]
+                                                                                    #^--- here
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_corrupt_reserved_2(self):
+        sector_data = [  0,  41,   2,   8, 221, 149, 183,   2,   3,  54, 145, 134, 236, 187, 148, 127,
+                       252,   8, 110,  11, 216, 137, 190, 173,  11, 169, 179, 228,  15, 190, 237,  69,
+                       229,  84, 176, 173,  43, 68,  122, 135, 249,  16, 127,   8,   0,   1, 193, 230]
+                                                                                         #^--- here
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    def test_validate_blank_sector(self):
+        sector_data = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                       0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                       0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+        secret = base64.b64decode('0sS8ir/1YB8P47dwDRQZLFODh0HyrNg=')
+        try:
+            assert self.tag.validate_sector(sector_data, secret)
+            assert False
+        except doord.TagException:
+            pass
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [41, 42, 43]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_again(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [43, 42, 44]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_ahead_of_count(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [81, 82, 83]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_ahead_of_count_alt(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [83, 82, 84]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_over_spced(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [12, 42, 43]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_overspaced_alt(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [43, 12, 44]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_bad_sector_a(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [doord.TagException('This sector is junk.'), 42, 43]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_bad_sector_b(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [43, doord.TagException('Splat that!'), 44]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.return_value = [2, 4, 5]
+        assert self.tag.authenticate() == (True, [2, 4, 5])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_both_sectors_bad(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = doord.TagException('Bad sector you got there')
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_cloned_tag(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [41, 42]
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_cloned_tag_alt(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 44
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [43, 42]
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_alien_tag(self,
+            mock_write_sector,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.side_effect = doord.EntryDatabaseException("Unkown tag")
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_unassigned_tag(self,
+            mock_write_sector,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.side_effect = doord.EntryDatabaseException("Unassigned tag")
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_get_user_error(self,
+            mock_write_sector,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.side_effect = doord.EntryDatabaseException("Something else")
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticatei_read_error_a(self,
+            mock_write_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = doord.TagException('READERR')
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticatei_read_error_b(self,
+            mock_write_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = ['anything', doord.TagException('READERR')]
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticatei_write_error(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [41, 42, 43]
+        mock_write_sector.side_effect = doord.TagException('Cant write joined up')
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_redback_error(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = ['irrelevant', 'irrelephant', doord.TagException('OMG')]
+        mock_validate_sector.side_effect = [41, 42, 43]
+        mock_write_sector.return_value = None
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_redback_validte_error(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = 'irrelevant'
+        mock_validate_sector.side_effect = [41, 42, doord.TagException('INVALID')]
+        mock_write_sector.return_value = None
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_redback_not_updated(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = 'irrelevant'
+        mock_validate_sector.side_effect = [41, 42, 41]
+        mock_write_sector.return_value = None
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticatei_write_error_alt(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [43, 42, 44]
+        mock_write_sector.side_effect = doord.TagException('Cant write joined up')
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_redback_error_alt(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = ['irrelevant', 'irrelephant', doord.TagException('OMG')]
+        mock_validate_sector.side_effect = [43, 42, 44]
+        mock_write_sector.return_value = None
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_redback_validte_error_alt(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = 'irrelevant'
+        mock_validate_sector.side_effect = [43, 42, doord.TagException('INVALID')]
+        mock_write_sector.return_value = None
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    def test_authenticate_redback_not_updated_alt(self,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 43
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.side_effect = 'irrelevant'
+        mock_validate_sector.side_effect = [43, 42, 42]
+        mock_write_sector.return_value = None
+        assert self.tag.authenticate() == (False, [])
+        mock_write_sector.assert_called_once_with(2, [2,3,4,5,6,7], self.nfc.PICC_AUTHENT1B, 'dontcare', 44)
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_tag_count')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.get_tag_sector_b_secret')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_authenticate_get_roles_fail(self,
+            mock_db_get_roles,
+            mock_db_set_count,
+            mock_write_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_db_get_secret_b,
+            mock_db_get_keyb_b,
+            mock_db_get_sector_b,
+            mock_db_get_secret_a,
+            mock_db_get_keyb_a,
+            mock_db_get_sector_a,
+            mock_db_get_count,
+            mock_db_get_name,
+            mock_db_get_user,
+            mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_db_get_user.return_value = '00003'
+        mock_db_get_name.return_value = 'Bracken Dawson'
+        mock_db_get_count.return_value = 42
+        mock_db_get_sector_a.return_value = 1
+        mock_db_get_keyb_a.return_value = [1,2,3,4,5,6]
+        mock_db_get_secret_a.return_value = 'doesntmatter'
+        mock_db_get_sector_b.return_value = 2
+        mock_db_get_keyb_b.return_value = [2,3,4,5,6,7]
+        mock_db_get_secret_b.return_value = 'dontcare'
+        mock_read_sector.return_value = 'irrelevant'
+        mock_validate_sector.side_effect = [41, 42, 43]
+        mock_write_sector.return_value = None
+        mock_db_set_count.return_value = None
+        mock_db_get_roles.side_effect = doord.EntryDatabaseException('wat roles?')
+        assert self.tag.authenticate() == (True, [])
+        mock_write_sector.assert_called_once_with(1, [1,2,3,4,5,6], self.nfc.PICC_AUTHENT1B, 'doesntmatter', 43)
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.set_tag_user')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_secret')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_key_a')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_a')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.server_push_now')
+    def test_initialize(self,
+            mock_db_server_push,
+            mock_db_keyb_b,
+            mock_db_keyb_a,
+            mock_db_keya_b,
+            mock_db_keya_a,
+            mock_db_secret_b,
+            mock_db_secret_a,
+            mock_db_sector_b,
+            mock_db_sector_a,
+            mock_db_count,
+            mock_db_user,
+            mock_db_init,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'irrelephant'
+        mock_validate_sector.side_effect = [0, 1, 0, 1]
+        mock_configure_sector.return_value = None
+        mock_db_keyb_b.return_value = None
+        mock_db_keyb_a.return_value = None
+        mock_db_keya_b.return_value = None
+        mock_db_keya_a.return_value = None
+        mock_db_secret_b.return_value = None
+        mock_db_secret_a.return_value = None
+        mock_db_sector_b.return_value = None
+        mock_db_sector_a.return_value = None
+        mock_db_count.return_value = None
+        mock_db_user.return_value = None
+        mock_db_server_push.return_value = None
+        self.tag.initialize(3, 4, sector_keys="production")
+        assert mock_write_sector.call_count == 2
+        name, args, posargs = mock_write_sector.mock_calls[0]
+        assert args[0] == 3
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == 0
+        name, args, posargs = mock_write_sector.mock_calls[1]
+        assert args[0] == 4
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == 1
+        assert mock_configure_sector.call_count == 2
+        name, args, posargs = mock_configure_sector.mock_calls[0]
+        assert args[0] == 3
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == [0x7F,0x07,0x88,0x69]
+        name, args, posargs = mock_configure_sector.mock_calls[1]
+        assert args[0] == 4
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == [0x7F,0x07,0x88,0x69]
+        assert mock_db_keyb_b.called
+        assert mock_db_keyb_a.called
+        assert mock_db_keya_b.called
+        assert mock_db_keya_a.called
+        assert mock_db_secret_b.called
+        assert mock_db_secret_a.called
+        mock_db_sector_a.assert_called_with('fedcba98', 3)
+        mock_db_sector_b.assert_called_with('fedcba98', 4)
+        mock_db_count.assert_called_with('fedcba98', 1)
+        mock_db_user.assert_called_with('fedcba98', None)
+        assert mock_db_server_push.called
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.set_tag_user')
+    @mock.patch('doord.EntryDatabase.set_tag_count')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_sector')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_secret')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_secret')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_key_a')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_a_key_b')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_a')
+    @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_b')
+    @mock.patch('doord.EntryDatabase.server_push_now')
+    def test_initialize(self,
+            mock_db_server_push,
+            mock_db_keyb_b,
+            mock_db_keyb_a,
+            mock_db_keya_b,
+            mock_db_keya_a,
+            mock_db_secret_b,
+            mock_db_secret_a,
+            mock_db_sector_b,
+            mock_db_sector_a,
+            mock_db_count,
+            mock_db_user,
+            mock_db_init,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'irrelephant'
+        mock_validate_sector.side_effect = [0, 1, 0, 1]
+        mock_configure_sector.return_value = None
+        mock_db_keyb_b.return_value = None
+        mock_db_keyb_a.return_value = None
+        mock_db_keya_b.return_value = None
+        mock_db_keya_a.return_value = None
+        mock_db_secret_b.return_value = None
+        mock_db_secret_a.return_value = None
+        mock_db_sector_b.return_value = None
+        mock_db_sector_a.return_value = None
+        mock_db_count.return_value = None
+        mock_db_user.return_value = None
+        mock_db_server_push.return_value = None
+        self.tag.initialize(3, 4, sector_keys="production")
+        assert mock_write_sector.call_count == 2
+        name, args, posargs = mock_write_sector.mock_calls[0]
+        assert args[0] == 3
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == 0
+        name, args, posargs = mock_write_sector.mock_calls[1]
+        assert args[0] == 4
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == 1
+        assert mock_configure_sector.call_count == 2
+        name, args, posargs = mock_configure_sector.mock_calls[0]
+        assert args[0] == 3
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == [0x7F,0x07,0x88,0x69]
+        name, args, posargs = mock_configure_sector.mock_calls[1]
+        assert args[0] == 4
+        assert args[1] == [255,255,255,255,255,255]
+        assert args[2] == self.nfc.PICC_AUTHENT1A
+        assert args[4] == [0x7F,0x07,0x88,0x69]
+        assert mock_db_keyb_b.called
+        assert mock_db_keyb_a.called
+        assert mock_db_keya_b.called
+        assert mock_db_keya_a.called
+        assert mock_db_secret_b.called
+        assert mock_db_secret_a.called
+        mock_db_sector_a.assert_called_with('fedcba98', 3)
+        mock_db_sector_b.assert_called_with('fedcba98', 4)
+        mock_db_count.assert_called_with('fedcba98', 1)
+        mock_db_user.assert_called_with('fedcba98', None)
+        assert mock_db_server_push.called
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_write_fail_a(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.side_effect = doord.TagException('boom')
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except doord.TagException:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_write_fail_b(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.side_effect = [None, doord.TagException('boom')]
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except doord.TagException:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_read_fail_a(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = doord.TagException('shake')
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except doord.TagException:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_read_fail_b(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = ['not related to elephants', doord.TagException('the')]
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except doord.TagException:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_validate_fail_a(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'irrelephant'
+        mock_validate_sector.side_effect = doord.TagException('room')
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_validate_fail_b(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'irrelephant'
+        mock_validate_sector.side_effect = [0, doord.TagException('room')]
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_configure_fail_a(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'irrelephant'
+        mock_validate_sector.side_effect = [0, 1]
+        mock_configure_sector.return_value = doord.TagException('cant configure the unconfigurable')
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_configure_fail_b(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'irrelephant'
+        mock_validate_sector.side_effect = [0, 1]
+        mock_configure_sector.side_effect = [None, doord.TagException('like a cisco switch')]
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_reread_fail_a(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.side_effect = ['a', 'b', doord.TagException('like a fat gazelle')]
+        mock_validate_sector.side_effect = [0, 1]
+        mock_configure_sector.return_value = None
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_reread_fail_b(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.side_effect = ['a', 'b', 'c', doord.TagException('like a fat gazelle')]
+        mock_validate_sector.side_effect = [0, 1]
+        mock_configure_sector.return_value = None
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_revalidate_fail_a(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'Its after midnight now'
+        mock_validate_sector.side_effect = [0, 1, doord.TagException('phail')]
+        mock_configure_sector.return_value = None
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
+
+    @mock.patch('doord.Tag.write_sector')
+    @mock.patch('doord.Tag.read_sector')
+    @mock.patch('doord.Tag.validate_sector')
+    @mock.patch('doord.Tag.configure_sector')
+    def test_initialize_revalidate_fail_b(self,
+            mock_configure_sector,
+            mock_validate_sector,
+            mock_read_sector,
+            mock_write_sector):
+        mock_write_sector.return_value = None
+        mock_read_sector.return_value = 'Its after midnight now'
+        mock_validate_sector.side_effect = [0, 1, 0, doord.TagException('phail')]
+        mock_configure_sector.return_value = None
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except:
+            pass
 
 class TestTagStatic(unittest.TestCase):
 
@@ -73,7 +1757,7 @@ class TestTagStatic(unittest.TestCase):
         assert self.tag.subtract(65535, 1) == 65534
         assert self.tag.subtract(32768, 1) == 32767
         assert self.tag.subtract(32767, 1) == 32766
-    
+
     def test_greater_than(self):
         assert self.tag.greater_than(1, 0) == True
         assert self.tag.greater_than(0, 1) == False
