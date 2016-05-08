@@ -995,7 +995,6 @@ class EntryDatabaseException(Exception):
     pass
 
 if __name__ == '__main__':
-    #initialise a tag using well known sector keys #TODO, also get here by pressing a button on the door
     if len(sys.argv) > 1:
         if sys.argv[1] != "safe" and sys.argv[1] != "init":
             print "python doord.py [init|safe [sector_a_sector] [sector_b_sector]|help]"
