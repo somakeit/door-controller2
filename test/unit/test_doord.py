@@ -1849,7 +1849,7 @@ class TestEntryDatabase(unittest.TestCase):
             assert False
         except doord.EntryDatabaseException:
             pass
-    
+
     @requests_mock.mock()
     def test_server_pull_now_bad_status(self, internet):
         internet.get('https://example.com/rfid', text='Go away', status_code='403')
@@ -1901,7 +1901,7 @@ class TestEntryDatabase(unittest.TestCase):
         assert len(internet.request_history) == 2
         assert len(self.db.unsent.keys()) == 0
         assert len(self.db.send_queue) == 0
-        assert type(self.db.unsent) == multiprocessing.managers.DictProxy    
+        assert type(self.db.unsent) == multiprocessing.managers.DictProxy
 
     @requests_mock.mock()
     def test_server_poll_woker_no_updates(self, internet):
@@ -1933,7 +1933,7 @@ class TestEntryDatabase(unittest.TestCase):
         assert type(self.db.unsent) == multiprocessing.managers.DictProxy
         #This also tests a changing db on the server
         assert dict(self.db.local) == testdict2
-        
+
     @requests_mock.mock()
     def test_server_poll_worker_update_retry(self, internet):
         testdict0 = {u'the first': 'json'}
@@ -2068,6 +2068,20 @@ class TestEntryDatabase(unittest.TestCase):
         assert type(self.db.local) == multiprocessing.managers.DictProxy
         assert type(self.db.unsent) == multiprocessing.managers.DictProxy
         assert len(self.db.unsent.keys()) > 0
+
+    def test_tag_count_range(self):
+        self.db.set_tag_count('fedcba98', -1)
+        try:
+            assert self.db.get_tag_count('fedcba98')
+            assert False
+        except doord.EntryDatabaseException:
+            pass
+        self.db.set_tag_count('fedcba98', 65536)
+        try:
+            assert self.db.get_tag_count('fedcba98')
+            assert False
+        except doord.EntryDatabaseException:
+            pass
 
     def test_tag_sector_a_sector(self):
         assert len(self.db.unsent.keys()) == 0

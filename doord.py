@@ -768,10 +768,10 @@ class EntryDatabase:
 
     def get_tag_count(self, uid):
         try:
-            if type(self.local['tags'][uid]['count']) is int:
+            if (type(self.local['tags'][uid]['count']) is int) and (0 <= self.local['tags'][uid]['count'] <= 65535):
                 return self.local['tags'][uid]['count']
             else:
-                raise EntryDatabaseException("count not an int: " + str(self.local['tags'][uid]['count'])) #TESTME counts >65535 and <0
+                raise EntryDatabaseException("count not an int or out of range: " + str(self.local['tags'][uid]['count']))
         except KeyError as e:
             raise EntryDatabaseException("KeyError: " + str(e))
 
