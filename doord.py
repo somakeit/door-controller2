@@ -737,7 +737,7 @@ class EntryDatabase:
                         # do not continue to push send_queue on a failure, it may deliver out of order
                         return
             except requests.exceptions.RequestException as e:
-                print "POST request error: " + str(e) + " - send_queue: " + str(len(self.send_queue)) + ")"
+                print "POST request error: " + str(e) + " (send_queue: " + str(len(self.send_queue)) + ")"
                 # same warnings as bad status code above
                 return
 
