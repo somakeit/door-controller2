@@ -3,3 +3,4 @@ crc16
 bcrypt
 requests[security]
 requests_mock
+pep8
