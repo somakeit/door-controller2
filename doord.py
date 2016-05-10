@@ -378,6 +378,9 @@ class Tag:
         self.db.log_auth(str(self), location, result)
 
     def initialize(self, sector_a_sector, sector_b_sector, sector_keys="production"):
+        if self.db.tag_in_db(str(self)):
+            raise TagException('DO NOT initialise a serial that is in the database, DOS or Breach may result.')
+
         print "Generating random elements"
         # bcrypt will reject a count padded with a null (chr(0)) character.
         # It will also reject unicode text objects (u"hello") but not unicode
@@ -984,6 +987,11 @@ class EntryDatabase:
                 raise EntryDatabaseException("User roles is not a list: " + str(self.local['users'][userid]['roles']))
         except KeyError as e:
             raise EntryDatabaseException("KeyError: " + str(e))
+
+    def tag_in_db(self, uid):
+        if 'tags' in self.local:
+            return uid in self.local['tags']
+        return False
 
     def log_auth(self, uid, location, result):
         # vivify cannot append to lists

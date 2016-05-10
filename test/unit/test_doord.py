@@ -1382,6 +1382,7 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_a')
     @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_b')
     @mock.patch('doord.EntryDatabase.server_push_now')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
     def test_initialize(self,
                         mock_db_server_push,
                         mock_db_keyb_b,
@@ -1401,6 +1402,7 @@ class TestTag(unittest.TestCase):
                         mock_write_sector):
         mock_db_init.return_value = None
         self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
         mock_validate_sector.side_effect = [0, 1, 0, 1]
@@ -1450,6 +1452,18 @@ class TestTag(unittest.TestCase):
         mock_db_count.assert_called_with('fedcba98', 1)
         mock_db_user.assert_called_with('fedcba98', None)
         assert mock_db_server_push.called
+
+    @mock.patch('doord.EntryDatabase.__init__')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    def test_initializei_already_in_db(self, mock_tag_in_db, mock_db_init):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = True
+        try:
+            self.tag.initialize(3, 4, sector_keys="production")
+            assert False
+        except doord.TagException:
+            pass
 
     @mock.patch('doord.Tag.write_sector')
     @mock.patch('doord.Tag.read_sector')
@@ -1467,7 +1481,9 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_a')
     @mock.patch('doord.EntryDatabase.set_tag_sector_b_key_b')
     @mock.patch('doord.EntryDatabase.server_push_now')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
     def test_initialize(self,
+                        mock_tag_in_db,
                         mock_db_server_push,
                         mock_db_keyb_b,
                         mock_db_keyb_a,
@@ -1486,6 +1502,7 @@ class TestTag(unittest.TestCase):
                         mock_write_sector):
         mock_db_init.return_value = None
         self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
         mock_validate_sector.side_effect = [0, 1, 0, 1]
@@ -1540,11 +1557,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_write_fail_a(self,
+                                     mock_db_init,
+                                     mock_tag_in_db,
                                      mock_configure_sector,
                                      mock_validate_sector,
                                      mock_read_sector,
                                      mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.side_effect = doord.TagException('boom')
         try:
             self.tag.initialize(3, 4, sector_keys="production")
@@ -1556,11 +1580,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_write_fail_b(self,
+                                     mock_db_init,
+                                     mock_tag_in_db,
                                      mock_configure_sector,
                                      mock_validate_sector,
                                      mock_read_sector,
                                      mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.side_effect = [None, doord.TagException('boom')]
         try:
             self.tag.initialize(3, 4, sector_keys="production")
@@ -1572,11 +1603,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_read_fail_a(self,
+                                    mock_db_init,
+                                    mock_tag_in_db,
                                     mock_configure_sector,
                                     mock_validate_sector,
                                     mock_read_sector,
                                     mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = doord.TagException('shake')
         try:
@@ -1589,11 +1627,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_read_fail_b(self,
+                                    mock_db_init,
+                                    mock_tag_in_db,
                                     mock_configure_sector,
                                     mock_validate_sector,
                                     mock_read_sector,
                                     mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = ['not related to elephants', doord.TagException('the')]
         try:
@@ -1606,11 +1651,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_validate_fail_a(self,
+                                        mock_db_init,
+                                        mock_tag_in_db,
                                         mock_configure_sector,
                                         mock_validate_sector,
                                         mock_read_sector,
                                         mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
         mock_validate_sector.side_effect = doord.TagException('room')
@@ -1624,11 +1676,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_validate_fail_b(self,
+                                        mock_db_init,
+                                        mock_tag_in_db,
                                         mock_configure_sector,
                                         mock_validate_sector,
                                         mock_read_sector,
                                         mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
         mock_validate_sector.side_effect = [0, doord.TagException('room')]
@@ -1642,11 +1701,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_configure_fail_a(self,
+                                         mock_db_init,
+                                         mock_tag_in_db,
                                          mock_configure_sector,
                                          mock_validate_sector,
                                          mock_read_sector,
                                          mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
         mock_validate_sector.side_effect = [0, 1]
@@ -1661,11 +1727,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_configure_fail_b(self,
+                                         mock_db_init,
+                                         mock_tag_in_db,
                                          mock_configure_sector,
                                          mock_validate_sector,
                                          mock_read_sector,
                                          mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
         mock_validate_sector.side_effect = [0, 1]
@@ -1680,11 +1753,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_reread_fail_a(self,
+                                      mock_db_init,
+                                      mock_tag_in_db,
                                       mock_configure_sector,
                                       mock_validate_sector,
                                       mock_read_sector,
                                       mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.side_effect = ['a', 'b', doord.TagException('like a fat gazelle')]
         mock_validate_sector.side_effect = [0, 1]
@@ -1699,11 +1779,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_reread_fail_b(self,
+                                      mock_db_init,
+                                      mock_tag_in_db,
                                       mock_configure_sector,
                                       mock_validate_sector,
                                       mock_read_sector,
                                       mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.side_effect = ['a', 'b', 'c', doord.TagException('like a fat gazelle')]
         mock_validate_sector.side_effect = [0, 1]
@@ -1718,11 +1805,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_revalidate_fail_a(self,
+                                          mock_db_init,
+                                          mock_tag_in_db,
                                           mock_configure_sector,
                                           mock_validate_sector,
                                           mock_read_sector,
                                           mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'Its after midnight now'
         mock_validate_sector.side_effect = [0, 1, doord.TagException('phail')]
@@ -1737,11 +1831,18 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.Tag.read_sector')
     @mock.patch('doord.Tag.validate_sector')
     @mock.patch('doord.Tag.configure_sector')
+    @mock.patch('doord.EntryDatabase.tag_in_db')
+    @mock.patch('doord.EntryDatabase.__init__')
     def test_initialize_revalidate_fail_b(self,
+                                          mock_db_init,
+                                          mock_tag_in_db,
                                           mock_configure_sector,
                                           mock_validate_sector,
                                           mock_read_sector,
                                           mock_write_sector):
+        mock_db_init.return_value = None
+        self.tag.db = doord.EntryDatabase()
+        mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'Its after midnight now'
         mock_validate_sector.side_effect = [0, 1, 0, doord.TagException('phail')]
@@ -2187,6 +2288,12 @@ class TestEntryDatabase(unittest.TestCase):
         assert self.db.unsent['tags']['fedcba98']['scans'][0]['location'] == 'DOOR1'
         assert self.db.unsent['tags']['fedcba98']['scans'][0]['result'] == 'allowed'
         assert self.db.unsent['tags']['fedcba98']['scans'][0]['assigned_user'] == '00001'
+
+    def test_tag_in_db(self):
+        assert self.db.tag_in_db('fedcba98') is False
+        self.db.local.update({'tags': {'fedcba98': {'assigned_user': '00001'}}})
+        assert self.db.tag_in_db('fedcba98') is True
+        assert self.db.tag_in_db('76543210') is False
 
 
 class TestCodeFormat(unittest.TestCase):
