@@ -17,19 +17,13 @@ import MFRC522
 
 
 class DoorService:
-    nfc = None
-    db = None
-    recent_tags = {}
     SERVER_POLL = 300  # seconds
-    last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
-    DOOR_IO = 7  # pi numbering
+    DOOR_IO = 18  # pi numbering
     DOOR_OPEN_TIME = 5  # seconds
-    door_opened = 0
     LED_IO = 18
     LED_HEARTBEAT_TIMES = (0.1, 5)  # on, off time in seconds
     LED_DOOR_OPEN_TIMES = (0.25, 0.25)
     LED_MAGIC_TAG_TIMES = (0.1, 0.1)
-    led_last_time = 0
     MAGIC_TAGS = {"88046609": "init_tag",  # 4-byte UIDs of "magic" tags that cause the doord to perform actions
                   "b": "init_tag_safe",  # NEVER set this one
                   "88046509": "pull_db"}
@@ -46,6 +40,11 @@ class DoorService:
     def __init__(self):
         self.nfc = MFRC522.MFRC522()
         self.db = EntryDatabase()
+
+        recent_tags = {}
+        last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
+        door_opened = os.times()[4]
+        led_last_time = os.times()[4]
 
         gpio.setmode(gpio.BOARD)
         gpio.setup(self.DOOR_IO, gpio.OUT)
