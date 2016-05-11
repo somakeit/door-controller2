@@ -19,6 +19,7 @@ import MFRC522
 class DoorService:
     SERVER_POLL = 300  # seconds
     DOOR_IO = 15  # pi numbering
+    SWITCH_IO = 11
     LED_IO = 18
     LED_HEARTBEAT_TIMES = (0.1, 5)  # on, off time in seconds
     LED_DOOR_OPEN_TIMES = (0.25, 0.25)
@@ -44,9 +45,9 @@ class DoorService:
 
         self.nfc = MFRC522.MFRC522()
         self.db = EntryDatabase(self.settings['server_url'], self.settings['api_key'])
-        MEMBER = self.settings['member_role_id']
-        KEYHOLDER = self.settings['keyholder_role_id']
-        LOCATION = self.settings['location_name']
+        iself.MEMBER = self.settings['member_role_id']
+        self.KEYHOLDER = self.settings['keyholder_role_id']
+        self.LOCATION = self.settings['location_name']
 
         self.recent_tags = {}
         self.last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
@@ -56,9 +57,9 @@ class DoorService:
         gpio.setmode(gpio.BOARD)
         gpio.setup(self.DOOR_IO, gpio.OUT)
         gpio.output(self.DOOR_IO, gpio.LOW)
-        if self.LED_IO:
-            gpio.setup(self.LED_IO, gpio.OUT)
-            gpio.output(self.LED_IO, gpio.LOW)
+        gpio.setup(self.LED_IO, gpio.OUT)
+        gpio.output(self.LED_IO, gpio.LOW)
+        gpio.setup(SWITCH_IO, gpio.IN, pull_up_down=gpio.PUD_UP)
 
         print "Initialised"
 
@@ -95,7 +96,7 @@ class DoorService:
                     (status, roles) = tag.authenticate()
                     if status:
                         self.recent_tags[str(tag)] = os.times()[4]
-                        if self.KEYHOLDER in roles:
+                        if (self.KEYHOLDER in roles) or (self.MEMBER in roles and gpio.input(self.SWITCH_IO) == 0):
                             # open the door
                             print "Tag " + str(tag) + " authenticated"
                             tag.log_auth(self.LOCATION, "allowed")
