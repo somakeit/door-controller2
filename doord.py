@@ -41,10 +41,10 @@ class DoorService:
         self.nfc = MFRC522.MFRC522()
         self.db = EntryDatabase()
 
-        recent_tags = {}
-        last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
-        door_opened = os.times()[4]
-        led_last_time = os.times()[4]
+        self.recent_tags = {}
+        self.last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
+        self.door_opened = os.times()[4]
+        self.led_last_time = os.times()[4]
 
         gpio.setmode(gpio.BOARD)
         gpio.setup(self.DOOR_IO, gpio.OUT)
