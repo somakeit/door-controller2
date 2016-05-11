@@ -45,7 +45,7 @@ class DoorService:
 
         self.nfc = MFRC522.MFRC522()
         self.db = EntryDatabase(self.settings['server_url'], self.settings['api_key'])
-        iself.MEMBER = self.settings['member_role_id']
+        self.MEMBER = self.settings['member_role_id']
         self.KEYHOLDER = self.settings['keyholder_role_id']
         self.LOCATION = self.settings['location_name']
 
@@ -59,7 +59,7 @@ class DoorService:
         gpio.output(self.DOOR_IO, gpio.LOW)
         gpio.setup(self.LED_IO, gpio.OUT)
         gpio.output(self.LED_IO, gpio.LOW)
-        gpio.setup(SWITCH_IO, gpio.IN, pull_up_down=gpio.PUD_UP)
+        gpio.setup(self.SWITCH_IO, gpio.IN, pull_up_down=gpio.PUD_UP)
 
         print "Initialised"
 
