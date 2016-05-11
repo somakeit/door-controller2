@@ -1,1 +1,9 @@
-{"api_key": "lol", "server_url": "http://localhost:8000"}
+{
+    "api_key": "lol",
+    "server_url": "http://localhost:8000/rfid-tags"
+    "init_tag_id": "fedcba98",
+    "pull_db_tag_id": "76543210",
+    "keyholder_role_id": 5,
+    "member_role_id": 4,
+    "location_name": "DOOR1"
+}

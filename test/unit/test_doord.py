@@ -126,7 +126,7 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.EntryDatabase.log_auth')
     def test_log_auth(self, mock_db_log, mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_log.return_value = None
         self.tag.log_auth('DOOR1', 'DENIED')
         mock_db_log.assert_called_once_with(str(self.tag), 'DOOR1', 'DENIED')
@@ -338,7 +338,7 @@ class TestTag(unittest.TestCase):
                           mock_db_get_user,
                           mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -388,7 +388,7 @@ class TestTag(unittest.TestCase):
                                 mock_db_get_user,
                                 mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -438,7 +438,7 @@ class TestTag(unittest.TestCase):
                                          mock_db_get_user,
                                          mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -487,7 +487,7 @@ class TestTag(unittest.TestCase):
                                              mock_db_get_user,
                                              mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -536,7 +536,7 @@ class TestTag(unittest.TestCase):
                                      mock_db_get_user,
                                      mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -586,7 +586,7 @@ class TestTag(unittest.TestCase):
                                          mock_db_get_user,
                                          mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -636,7 +636,7 @@ class TestTag(unittest.TestCase):
                                        mock_db_get_user,
                                        mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -686,7 +686,7 @@ class TestTag(unittest.TestCase):
                                        mock_db_get_user,
                                        mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -736,7 +736,7 @@ class TestTag(unittest.TestCase):
                                            mock_db_get_user,
                                            mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -783,7 +783,7 @@ class TestTag(unittest.TestCase):
                                      mock_db_get_user,
                                      mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -830,7 +830,7 @@ class TestTag(unittest.TestCase):
                                          mock_db_get_user,
                                          mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 44
@@ -853,7 +853,7 @@ class TestTag(unittest.TestCase):
                                     mock_db_get_user,
                                     mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.side_effect = doord.EntryDatabaseException("Unkown tag")
         assert self.tag.authenticate() == (False, [])
         mock_write_sector.assert_not_called()
@@ -866,7 +866,7 @@ class TestTag(unittest.TestCase):
                                          mock_db_get_user,
                                          mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.side_effect = doord.EntryDatabaseException("Unassigned tag")
         assert self.tag.authenticate() == (False, [])
         mock_write_sector.assert_not_called()
@@ -879,7 +879,7 @@ class TestTag(unittest.TestCase):
                                          mock_db_get_user,
                                          mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.side_effect = doord.EntryDatabaseException("Something else")
         assert self.tag.authenticate() == (False, [])
         mock_write_sector.assert_not_called()
@@ -910,7 +910,7 @@ class TestTag(unittest.TestCase):
                                         mock_db_get_user,
                                         mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -950,7 +950,7 @@ class TestTag(unittest.TestCase):
                                         mock_db_get_user,
                                         mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -992,7 +992,7 @@ class TestTag(unittest.TestCase):
                                        mock_db_get_user,
                                        mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -1036,7 +1036,7 @@ class TestTag(unittest.TestCase):
                                         mock_db_get_user,
                                         mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -1080,7 +1080,7 @@ class TestTag(unittest.TestCase):
                                                 mock_db_get_user,
                                                 mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -1124,7 +1124,7 @@ class TestTag(unittest.TestCase):
                                               mock_db_get_user,
                                               mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -1168,7 +1168,7 @@ class TestTag(unittest.TestCase):
                                            mock_db_get_user,
                                            mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -1212,7 +1212,7 @@ class TestTag(unittest.TestCase):
                                             mock_db_get_user,
                                             mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -1256,7 +1256,7 @@ class TestTag(unittest.TestCase):
                                                     mock_db_get_user,
                                                     mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -1300,7 +1300,7 @@ class TestTag(unittest.TestCase):
                                                   mock_db_get_user,
                                                   mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 43
@@ -1348,7 +1348,7 @@ class TestTag(unittest.TestCase):
                                          mock_db_get_user,
                                          mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_db_get_user.return_value = '00003'
         mock_db_get_name.return_value = 'Bracken Dawson'
         mock_db_get_count.return_value = 42
@@ -1401,7 +1401,7 @@ class TestTag(unittest.TestCase):
                         mock_read_sector,
                         mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
@@ -1457,7 +1457,7 @@ class TestTag(unittest.TestCase):
     @mock.patch('doord.EntryDatabase.tag_in_db')
     def test_initializei_already_in_db(self, mock_tag_in_db, mock_db_init):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = True
         try:
             self.tag.initialize(3, 4, sector_keys="production")
@@ -1501,7 +1501,7 @@ class TestTag(unittest.TestCase):
                         mock_read_sector,
                         mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
@@ -1567,7 +1567,7 @@ class TestTag(unittest.TestCase):
                                      mock_read_sector,
                                      mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.side_effect = doord.TagException('boom')
         try:
@@ -1590,7 +1590,7 @@ class TestTag(unittest.TestCase):
                                      mock_read_sector,
                                      mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.side_effect = [None, doord.TagException('boom')]
         try:
@@ -1613,7 +1613,7 @@ class TestTag(unittest.TestCase):
                                     mock_read_sector,
                                     mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = doord.TagException('shake')
@@ -1637,7 +1637,7 @@ class TestTag(unittest.TestCase):
                                     mock_read_sector,
                                     mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = ['not related to elephants', doord.TagException('the')]
@@ -1661,7 +1661,7 @@ class TestTag(unittest.TestCase):
                                         mock_read_sector,
                                         mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
@@ -1686,7 +1686,7 @@ class TestTag(unittest.TestCase):
                                         mock_read_sector,
                                         mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
@@ -1711,7 +1711,7 @@ class TestTag(unittest.TestCase):
                                          mock_read_sector,
                                          mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
@@ -1737,7 +1737,7 @@ class TestTag(unittest.TestCase):
                                          mock_read_sector,
                                          mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'irrelephant'
@@ -1763,7 +1763,7 @@ class TestTag(unittest.TestCase):
                                       mock_read_sector,
                                       mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.side_effect = ['a', 'b', doord.TagException('like a fat gazelle')]
@@ -1789,7 +1789,7 @@ class TestTag(unittest.TestCase):
                                       mock_read_sector,
                                       mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.side_effect = ['a', 'b', 'c', doord.TagException('like a fat gazelle')]
@@ -1815,7 +1815,7 @@ class TestTag(unittest.TestCase):
                                           mock_read_sector,
                                           mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'Its after midnight now'
@@ -1841,7 +1841,7 @@ class TestTag(unittest.TestCase):
                                           mock_read_sector,
                                           mock_write_sector):
         mock_db_init.return_value = None
-        self.tag.db = doord.EntryDatabase()
+        self.tag.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
         mock_tag_in_db.return_value = False
         mock_write_sector.return_value = None
         mock_read_sector.return_value = 'Its after midnight now'
@@ -1915,7 +1915,7 @@ class TestEntryDatabaseStatic(unittest.TestCase):
     @mock.patch('doord.EntryDatabase.__init__')
     def setUp(self, mock_db_init):
         mock_db_init.return_value = None
-        self.db = doord.EntryDatabase()
+        self.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
 
     def test_vivify(self):
         testdict = {
@@ -1944,7 +1944,7 @@ class TestEntryDatabase(unittest.TestCase):
         f.close()
 
         mock_server_pull_now.return_value = None
-        self.db = doord.EntryDatabase()
+        self.db = doord.EntryDatabase('https://example.com/rfid', 'lol')
 
     def tearDown(self):
         del(self.db)

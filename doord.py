@@ -18,28 +18,35 @@ import MFRC522
 
 class DoorService:
     SERVER_POLL = 300  # seconds
-    DOOR_IO = 18  # pi numbering
-    DOOR_OPEN_TIME = 5  # seconds
+    DOOR_IO = 15  # pi numbering
     LED_IO = 18
     LED_HEARTBEAT_TIMES = (0.1, 5)  # on, off time in seconds
     LED_DOOR_OPEN_TIMES = (0.25, 0.25)
     LED_MAGIC_TAG_TIMES = (0.1, 0.1)
-    MAGIC_TAGS = {"88046609": "init_tag",  # 4-byte UIDs of "magic" tags that cause the doord to perform actions
-                  "b": "init_tag_safe",  # NEVER set this one
-                  "88046509": "pull_db"}
     MAGIC_TAG_TIMEOUT = 10  # seconds
     DEFAULT_SECTOR_A = 1
     DEFAULT_SECTOR_B = 2
-    FRIEND = 1
-    TRUSTEE = 2
-    SUPPORTER = 3
-    MEMBER = 4
-    KEYHOLDER = 5
-    LOCATION = "DOOR1"
 
     def __init__(self):
+
+        try:
+            rcfile = open('doorrc', 'r')
+        except IOError:
+            print "Can't read file: 'doorrc', you need that."
+            sys.exit(1)
+        self.settings = json.loads(rcfile.read())
+        rcfile.close()
+
+        self.DOOR_OPEN_TIME = 5  # seconds
+        self.MAGIC_TAGS = {self.settings['init_tag_id']: "init_tag",  # 4-byte UIDs of "magic" tags that cause the doord to perform actions
+                           "b": "init_tag_safe",  # NEVER set this one
+                           self.settings['pull_db_tag_id']: "pull_db"}
+
         self.nfc = MFRC522.MFRC522()
-        self.db = EntryDatabase()
+        self.db = EntryDatabase(self.settings['server_url'], self.settings['api_key'])
+        MEMBER = self.settings['member_role_id']
+        KEYHOLDER = self.settings['keyholder_role_id']
+        LOCATION = self.settings['location_name']
 
         self.recent_tags = {}
         self.last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
@@ -642,7 +649,7 @@ class TagException(Exception):
 
 class EntryDatabase:
 
-    def __init__(self):
+    def __init__(self, server_url, api_key):
         self.proc = None
         self.mgr = Manager()
         self.lock = Lock()
@@ -651,19 +658,8 @@ class EntryDatabase:
         self.send_queue = self.mgr.list()  # list uf updates we're trying to send in order
         self.server_url = None
         self.api_key = None
-
-        # load settings
-        try:
-            rcfile = open('doorrc', 'r')
-        except IOError:
-            print "Can't read file: 'doorrc', you need that."
-            sys.exit(1)
-
-        settings = json.loads(rcfile.read())
-        rcfile.close()
-
-        self.server_url = settings['server_url']
-        self.api_key = settings['api_key']
+        self.server_url = server_url
+        self.api_key = api_key
 
         # pull server copy down, retry forever here as we can do nothing
         # until we have the db.
@@ -1034,8 +1030,18 @@ if __name__ == '__main__':
             print "    help - Show this help document."
             sys.exit(2)
 
+        try:
+            rcfile = open('doorrc', 'r')
+        except IOError:
+            print "Can't read file: 'doorrc', you need that."
+            sys.exit(1)
+        settings = json.loads(rcfile.read())
+        rcfile.close()
+
+        self.nfc = MFRC522.MFRC522()
+        self.db = EntryDatabase(self.settings['server_url'], self.settings['api_key'])
         nfc = MFRC522.MFRC522()
-        db = EntryDatabase()
+        db = EntryDatabase(settings['server_url'], settings['api_key'])
         if sys.argv[1] == "init":
             print "Initializing tag with production keys"
         else:
