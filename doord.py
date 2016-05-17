@@ -70,65 +70,72 @@ class DoorService:
 
     def main(self):
         while True:
-            (status, TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)  # searches for a card for up to approxamately 100ms
+            self._iter()
+            self._server_iter()
+            self._led_iter()
 
-            # is a device presented
+    def _iter(self):
+        (status, TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)  # searches for a card for up to approxamately 100ms
+
+        # is a device presented
+        if status == self.nfc.MI_OK:
+
+            # run anti-collision and let the next id fall out
+            (status, uid) = self.nfc.MFRC522_Anticoll()
             if status == self.nfc.MI_OK:
+                tag = Tag(uid, self.nfc, self.db)
+                if (str(tag)) in self.MAGIC_TAGS:
+                    self.magic_tag(self.MAGIC_TAGS[str(tag)])
+                    return
 
-                # run anti-collision and let the next id fall out
-                (status, uid) = self.nfc.MFRC522_Anticoll()
-                if status == self.nfc.MI_OK:
-                    tag = Tag(uid, self.nfc, self.db)
-                    if (str(tag)) in self.MAGIC_TAGS:
-                        self.magic_tag(self.MAGIC_TAGS[str(tag)])
-                        continue
+                if str(tag) in self.recent_tags:
+                    if self.recent_tags[str(tag)] + self.DOOR_OPEN_TIME > os.times()[4]:
+                        del tag
+                        return  # ignore a tag for DEBOUNCE seconds after sucessful auth
+                gpio.output(self.LED_IO, gpio.HIGH)
+                print "Found tag UID: " + str(tag)
 
-                    if str(tag) in self.recent_tags:
-                        if self.recent_tags[str(tag)] + self.DOOR_OPEN_TIME > os.times()[4]:
-                            del tag
-                            continue  # ignore a tag for DEBOUNCE seconds after sucessful auth
-                    gpio.output(self.LED_IO, gpio.HIGH)
-                    print "Found tag UID: " + str(tag)
-
-                    # authenticate
-                    # lock database first to keep updates whole
-                    self.db.lock.acquire()
-                    (status, roles) = tag.authenticate()
-                    if status:
-                        self.recent_tags[str(tag)] = os.times()[4]
-                        if (self.KEYHOLDER in roles) or (self.MEMBER in roles and gpio.input(self.SWITCH_IO) == 0):
-                            # open the door
-                            print "Tag " + str(tag) + " authenticated"
-                            tag.log_auth(self.LOCATION, "allowed")
-                            self.door_opened = os.times()[4]
-                            gpio.output(self.DOOR_IO, gpio.HIGH)
-                        else:
-                            print "Tag " + str(tag) + " authenticated but NOT keyholder"
-                            tag.log_auth(self.LOCATION, "denied")
-                        # update the server with tag counts and scans early
-                        self.db.server_poll()
-                        self.last_server_poll = os.times()[4]
-
+                # authenticate
+                # lock database first to keep updates whole
+                self.db.lock.acquire()
+                (status, roles) = tag.authenticate()
+                if status:
+                    self.recent_tags[str(tag)] = os.times()[4]
+                    if (self.KEYHOLDER in roles) or (self.MEMBER in roles and gpio.input(self.SWITCH_IO) == 0):
+                        # open the door
+                        print "Tag " + str(tag) + " authenticated"
+                        tag.log_auth(self.LOCATION, "allowed")
+                        self.door_opened = os.times()[4]
+                        gpio.output(self.DOOR_IO, gpio.HIGH)
                     else:
-                        print "Tag " + str(tag) + " NOT authenticated"
-                    self.db.lock.release()
-
-                    del tag
-                    gpio.output(self.LED_IO, gpio.LOW)
-                    self.led_last_time = os.times()[4]
+                        print "Tag " + str(tag) + " authenticated but NOT keyholder"
+                        tag.log_auth(self.LOCATION, "denied")
+                    # update the server with tag counts and scans early
+                    self.db.server_poll()
+                    self.last_server_poll = os.times()[4]
 
                 else:
-                    print "Failed to read UID"
+                    print "Tag " + str(tag) + " NOT authenticated"
+                self.db.lock.release()
 
-            if self.door_opened > 0 and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
-                # close the door
-                gpio.output(self.DOOR_IO, gpio.LOW)
-                self.door_opened = 0
+                del tag
+                gpio.output(self.LED_IO, gpio.LOW)
+                self.led_last_time = os.times()[4]
 
+            else:
+                print "Failed to read UID"
+
+        if self.door_opened > 0 and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
+            # close the door
+            gpio.output(self.DOOR_IO, gpio.LOW)
+            self.door_opened = 0
+
+        def _server_iter(self):
             if os.times()[4] > self.last_server_poll + self.SERVER_POLL:
                 self.db.server_poll()
                 self.last_server_poll = os.times()[4]
 
+        def _led_iter(self):
             if gpio.input(self.DOOR_IO):
                 # door open
                 (ledon, ledoff) = self.LED_DOOR_OPEN_TIMES

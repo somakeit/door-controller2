@@ -17,6 +17,161 @@ sys.modules['MFRC522'] = __import__('mock_MFRC522')
 sys.modules['RPi'] = __import__('mock_RPi')
 import doord
 import MFRC522
+import RPi.GPIO
+
+
+class TestDoorService(unittest.TestCase):
+
+    @requests_mock.mock()
+    def setUp(self, internet):
+        reload(RPi.GPIO)
+        internet.get("https://example.com/rfid", text='{}')
+        f = open('doorrc', 'w')
+        # Minimum viable doorrc file, fill in extras in methods
+        f.write('''
+            {
+                "api_key": "lol",
+                "server_url": "https://example.com/rfid",
+                "init_tag_id": "",
+                "pull_db_tag_id": "",
+                "member_role_id": 4,
+                "keyholder_role_id": 5,
+                "location_name": ""
+            }
+            ''')
+        f.close()
+        self.ds = doord.DoorService()
+
+    def tearDown(self):
+        del(self.ds)
+
+    @mock.patch('doord.Tag.__init__')
+    def test_iter_no_tag(self, mock_tag_init):
+        RPi.GPIO.call_history = []
+        self.ds.nfc.return_code = self.ds.nfc.MI_NOTAGERR
+        self.ds._iter()
+        assert len(RPi.GPIO.call_history) == 0
+        mock_tag_init.assert_not_called()
+
+    @mock.patch('doord.Tag.__init__')
+    def test_iter_incompat_tag(self, mock_tag_init):
+        RPi.GPIO.call_history = []
+        self.ds.nfc.return_code = [self.ds.nfc.MI_OK, self.ds.nfc.MI_ERR]
+        self.ds._iter()
+        assert len(RPi.GPIO.call_history) == 0
+        mock_tag_init.assert_not_called()
+
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_recent_tag(self, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        self.ds.recent_tags = {'fedcba98': os.times()[4] - 1}
+        self.ds._iter()
+        assert len(RPi.GPIO.call_history) == 0
+        mock_tag_auth.assert_not_called()
+
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_tag_not_auth(self, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        self.ds.recent_tags = {'fedcba98': os.times()[4] - 10}  # also tests nonrecentness
+        mock_tag_auth.return_value = (False, [5])  # keyholder but auth failed, shouldn't actually happen
+        self.ds._iter()
+        # the door was not opened
+        for call in RPi.GPIO.call_history:
+            assert call['pin'] != self.ds.DOOR_IO
+        assert mock_tag_auth.call_count == 1
+
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_not_keyholder(self, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = 1  # the space switch is at pullup (space closed)
+        mock_tag_auth.return_value = (True, [4])  # just member
+        self.ds._iter()
+        # the door was not opened
+        for call in RPi.GPIO.call_history:
+            assert call['pin'] != self.ds.DOOR_IO
+        assert mock_tag_auth.call_count == 1
+
+    @mock.patch('doord.Tag.authenticate')
+    @mock.patch('doord.EntryDatabase.server_poll')
+    def test_iter_keyholder_space_closed(self, mock_db_poll, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = 1  # the space switch is at pullup (space closed)
+        mock_tag_auth.return_value = (True, [4, 5])
+        mock_db_poll.return_value = None
+        self.ds._iter()
+        door_opened = False
+        led_calls = 0
+        led = RPi.GPIO.LOW
+        for call in RPi.GPIO.call_history:
+            if call['pin'] == self.ds.DOOR_IO:
+                assert call['value'] == RPi.GPIO.HIGH
+                door_opened = True
+            elif call['pin'] == self.ds.LED_IO:
+                led_calls += 1
+                led = call['value']
+            else:
+                assert False
+        assert led_calls == 2
+        assert led == RPi.GPIO.LOW
+        assert door_opened
+        assert mock_tag_auth.call_count == 1
+        assert mock_db_poll.call_count == 1
+
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_keyholder_space_open(self, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = 0  # the space switch is at gnd (space open)
+        mock_tag_auth.return_value = (True, [4, 5])
+        self.ds._iter()
+        door_opened = False
+        for call in RPi.GPIO.call_history:
+            if call['pin'] == self.ds.DOOR_IO:
+                assert call['value'] == RPi.GPIO.HIGH
+                door_opened = True
+        assert door_opened
+        assert mock_tag_auth.call_count == 1
+
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_member_space_closed(self, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = 1  # the space switch is at pullup (space closed)
+        mock_tag_auth.return_value = (True, [4])  # just member
+        self.ds._iter()
+        # the door was not opened
+        for call in RPi.GPIO.call_history:
+            assert call['pin'] != self.ds.DOOR_IO
+        assert mock_tag_auth.call_count == 1
+
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_member_space_open(self, mock_tag_auth):
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = 0  # the space switch is at gnd (space open)
+        mock_tag_auth.return_value = (True, [4])  # just member
+        self.ds._iter()
+        door_opened = False
+        for call in RPi.GPIO.call_history:
+            if call['pin'] == self.ds.DOOR_IO:
+                assert call['value'] == RPi.GPIO.HIGH
+                door_opened = True
+        assert door_opened
+        assert mock_tag_auth.call_count == 1
+
+    def test_door_closed_on_init(self):
+        door_closed = False
+        for call in RPi.GPIO.call_history:
+            if call['method'] == 'output' and call['pin'] == self.ds.DOOR_IO:
+                assert call['value'] == RPi.GPIO.LOW
+                door_closed = True
+        assert door_closed
+
+    def test_door_closed_after_opened(self):
+        RPi.GPIO.call_history = []
+        self.ds.door_opened = os.times()[4] - 10
+        self.ds.nfc.return_code = self.ds.nfc.MI_NOTAGERR
+        self.ds._iter()
+        assert len(RPi.GPIO.call_history) == 1
+        assert RPi.GPIO.call_history[0]['pin'] == self.ds.DOOR_IO
+        assert RPi.GPIO.call_history[0]['value'] == RPi.GPIO.LOW
 
 
 class TestTag(unittest.TestCase):
@@ -112,6 +267,7 @@ class TestTag(unittest.TestCase):
         assert len(self.nfc.call_history) == 2
 
     def test_select_tag_on_init(self):
+        print self.nfc.call_history
         assert self.nfc.call_history[0]['method'] == 'MFRC522_SelectTag'
         assert self.nfc.call_history[0]['uid'] == self.tag.uid
 
