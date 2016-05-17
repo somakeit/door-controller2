@@ -173,6 +173,101 @@ class TestDoorService(unittest.TestCase):
         assert RPi.GPIO.call_history[0]['pin'] == self.ds.DOOR_IO
         assert RPi.GPIO.call_history[0]['value'] == RPi.GPIO.LOW
 
+    # os.times()[4] can be negative, which caused problems in the past
+    # check we initialise event times to the startup value of os.tmes()[4]
+    def test_event_times_init(self):
+        assert os.times()[4] - 1 < self.ds.door_opened <= os.times()[4]
+        assert os.times()[4] - 1 < self.ds.last_server_poll <= os.times()[4]
+        assert os.times()[4] - 1 < self.ds.led_last_time <= os.times()[4]
+
+    @mock.patch('doord.EntryDatabase.server_poll')
+    def test_server_iter_no_need(self, mock_server_poll):
+        print dir(self.ds)
+        self.ds._server_iter()
+        mock_server_poll.assert_not_called()
+
+    @mock.patch('doord.EntryDatabase.server_poll')
+    def test_server_iter(self, mock_server_poll):
+        self.ds.last_server_poll = os.times()[4] - self.ds.SERVER_POLL - 1
+        mock_server_poll.return_value = None
+        self.ds._server_iter()
+        assert mock_server_poll.call_count == 1
+
+    def test_led_logic(self):
+        self.ds.LED_HEARTBEAT_TIMES = (0.2, 5)
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = {self.ds.DOOR_IO: [0], self.ds.LED_IO: [0]}
+        self.ds.led_last_time = os.times()[4] - 4.9
+        self.ds._led_iter()
+        for call in RPi.GPIO.call_history:
+            assert call['method'] != 'ooutput'
+
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = {self.ds.DOOR_IO: [0], self.ds.LED_IO: [0]}
+        self.ds.led_last_time = os.times()[4] - 5.1
+        self.ds._led_iter()
+        for call in RPi.GPIO.call_history:
+            if call['method'] == 'output':
+                assert call['value'] == RPi.GPIO.HIGH
+
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = {self.ds.DOOR_IO: [0], self.ds.LED_IO: [1]}
+        self.ds.led_last_time = os.times()[4] - 0.1
+        self.ds._led_iter()
+        for call in RPi.GPIO.call_history:
+            assert call['method'] != 'ooutput'
+
+        RPi.GPIO.call_history = []
+        RPi.GPIO.output_value = {self.ds.DOOR_IO: [0], self.ds.LED_IO: [1]}
+        self.ds.led_last_time = os.times()[4] - 0.3
+        self.ds._led_iter()
+        for call in RPi.GPIO.call_history:
+            if call['method'] == 'output':
+                assert call['value'] == RPi.GPIO.LOW
+
+    @mock.patch('doord.Tag.authenticate')
+    @mock.patch('doord.EntryDatabase.server_poll')
+    def test_magic_tag_server_poll(self, mock_server_poll, mock_auth):
+        self.ds.MAGIC_TAGS['fedcba98'] = 'pull_db'
+        mock_server_poll.return_value = None
+        self.ds._iter()
+        mock_auth.assert_not_called()
+
+    @mock.patch('doord.Tag.authenticate')
+    @mock.patch('doord.DoorService.init_tag')
+    def test_magic_tag_init(self, mock_init, mock_auth):
+        self.ds.MAGIC_TAGS['fedcba98'] = 'init_tag'
+        mock_init.return_value = None
+        self.ds._iter()
+        mock_auth.assert_not_called()
+        assert mock_init.called
+
+    @mock.patch('doord.Tag.initialize')
+    def test_init_tag_dont_init_magic_tag_then_time_out(self, mock_init):
+        self.ds.MAGIC_TAGS['fedcba98'] = 'init_tag'
+        # Should be enough to think the magic tag was still present for 3 passes then no tag until the timeout
+        self.ds.nfc.return_code = []
+        for i in xrange(12):
+            self.ds.nfc.return_code.append(self.ds.nfc.MI_OK)
+        for i in xrange(99999):
+            self.ds.nfc.return_code.append(self.ds.nfc.MI_NOTAGERR)
+        self.ds.MAGIC_TAG_TIMEOUT = 1
+        RPi.GPIO
+        self.ds.init_tag()
+        mock_init.assert_not_called()
+
+    @mock.patch('doord.Tag.initialize')
+    def test_init_tag(self, mock_init):
+        mock_init.return_value = None
+        self.ds.init_tag()
+        assert mock_init.call_count == 1
+
+    @mock.patch('doord.Tag.initialize')
+    def test_init_tag_fail(self, mock_init):
+        mock_init.side_effect = doord.TagException('Well that could have gone better')
+        self.ds.init_tag()
+        assert mock_init.call_count == 1
+
 
 class TestTag(unittest.TestCase):
 
@@ -2462,5 +2557,5 @@ class TestCodeFormat(unittest.TestCase):
             'test/unit/mock_MFRC522.py'])
         self.assertEqual(result.total_errors, 0, "Found code style errors (and warnings).")
 
-if __name__ == '_main__':
+if __name__ == '__main__':
     unittest.main()

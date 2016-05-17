@@ -130,27 +130,27 @@ class DoorService:
             gpio.output(self.DOOR_IO, gpio.LOW)
             self.door_opened = 0
 
-        def _server_iter(self):
-            if os.times()[4] > self.last_server_poll + self.SERVER_POLL:
-                self.db.server_poll()
-                self.last_server_poll = os.times()[4]
+    def _server_iter(self):
+        if os.times()[4] > self.last_server_poll + self.SERVER_POLL:
+            self.db.server_poll()
+            self.last_server_poll = os.times()[4]
 
-        def _led_iter(self):
-            if gpio.input(self.DOOR_IO):
-                # door open
-                (ledon, ledoff) = self.LED_DOOR_OPEN_TIMES
-            else:
-                (ledon, ledoff) = self.LED_HEARTBEAT_TIMES
-            if gpio.input(self.LED_IO):
-                # LED on
-                if os.times()[4] > self.led_last_time + ledon:
-                    gpio.output(self.LED_IO, gpio.LOW)
-                    self.led_last_time = os.times()[4]
-            else:
-                # LED off
-                if os.times()[4] > self.led_last_time + ledoff:
-                    gpio.output(self.LED_IO, gpio.HIGH)
-                    self.led_last_time = os.times()[4]
+    def _led_iter(self):
+        if gpio.input(self.DOOR_IO):
+            # door open
+            (ledon, ledoff) = self.LED_DOOR_OPEN_TIMES
+        else:
+            (ledon, ledoff) = self.LED_HEARTBEAT_TIMES
+        if gpio.input(self.LED_IO):
+            # LED on
+            if os.times()[4] > self.led_last_time + ledon:
+                gpio.output(self.LED_IO, gpio.LOW)
+                self.led_last_time = os.times()[4]
+        else:
+            # LED off
+            if os.times()[4] > self.led_last_time + ledoff:
+                gpio.output(self.LED_IO, gpio.HIGH)
+                self.led_last_time = os.times()[4]
 
     def magic_tag(self, function):
         if function is "init_tag":
