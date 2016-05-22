@@ -165,10 +165,14 @@ class DoorService:
         print "Entered tag init mode: " + str(sector_keys)
         magic_tag_start = os.times()[4]
 
-        # get a tag
         while True:
-            (status, TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
+            # magic tag timeout
+            if os.times()[4] > magic_tag_start + self.MAGIC_TAG_TIMEOUT:
+                gpio.output(self.LED_IO, gpio.LOW)
+                self.led_last_time = os.times()[4]
+                return
 
+            (status, TagType) = self.nfc.MFRC522_Request(self.nfc.PICC_REQIDL)
             # is a device presented
             if status == self.nfc.MI_OK:
 
@@ -211,12 +215,6 @@ class DoorService:
                 if os.times()[4] > self.led_last_time + ledoff:
                     gpio.output(self.LED_IO, gpio.HIGH)
                     self.led_last_time = os.times()[4]
-
-            # magic tag timeout
-            if os.times()[4] > magic_tag_start + self.MAGIC_TAG_TIMEOUT:
-                gpio.output(self.LED_IO, gpio.LOW)
-                self.led_last_time = os.times()[4]
-                return
 
 
 class Tag:

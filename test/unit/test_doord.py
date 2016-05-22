@@ -243,16 +243,22 @@ class TestDoorService(unittest.TestCase):
         assert mock_init.called
 
     @mock.patch('doord.Tag.initialize')
-    def test_init_tag_dont_init_magic_tag_then_time_out(self, mock_init):
+    @mock.patch('doord.Tag.__init__')
+    @mock.patch('doord.Tag.__del__')
+    @mock.patch('doord.Tag.__str__')
+    def test_init_tag_dont_init_magic(self, mock_str, mock_del, mock_in, mock_init):
         self.ds.MAGIC_TAGS['fedcba98'] = 'init_tag'
-        # Should be enough to think the magic tag was still present for 3 passes then no tag until the timeout
-        self.ds.nfc.return_code = []
-        for i in xrange(12):
-            self.ds.nfc.return_code.append(self.ds.nfc.MI_OK)
-        for i in xrange(99999):
-            self.ds.nfc.return_code.append(self.ds.nfc.MI_NOTAGERR)
-        self.ds.MAGIC_TAG_TIMEOUT = 1
-        RPi.GPIO
+        self.ds.MAGIC_TAG_TIMEOUT = 0.1
+        mock_in.return_value = None
+        mock_del.teturn_value = None
+        mock_str.return_value = 'fedcba98'
+        self.ds.init_tag()
+        mock_init.assert_not_called()
+
+    @mock.patch('doord.Tag.initialize')
+    def test_init_tag_timeout(self, mock_init):
+        self.ds.nfc.return_code = self.ds.nfc.MI_NOTAGERR
+        self.ds.MAGIC_TAG_TIMEOUT = 0.1
         self.ds.init_tag()
         mock_init.assert_not_called()
 
