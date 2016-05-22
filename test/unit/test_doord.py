@@ -243,15 +243,9 @@ class TestDoorService(unittest.TestCase):
         assert mock_init.called
 
     @mock.patch('doord.Tag.initialize')
-    @mock.patch('doord.Tag.__init__')
-    @mock.patch('doord.Tag.__del__')
-    @mock.patch('doord.Tag.__str__')
-    def test_init_tag_dont_init_magic(self, mock_str, mock_del, mock_in, mock_init):
+    def test_init_tag_dont_init_magic(self, mock_init):
         self.ds.MAGIC_TAGS['fedcba98'] = 'init_tag'
         self.ds.MAGIC_TAG_TIMEOUT = 0.1
-        mock_in.return_value = None
-        mock_del.teturn_value = None
-        mock_str.return_value = 'fedcba98'
         self.ds.init_tag()
         mock_init.assert_not_called()
 
