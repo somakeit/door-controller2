@@ -51,7 +51,7 @@ class DoorService:
 
         self.recent_tags = {}
         self.last_server_poll = os.times()[4]  # EntryDatabase will force a blocking poll when instantiated
-        self.door_opened = os.times()[4]
+        self.door_opened = False
         self.led_last_time = os.times()[4]
 
         gpio.setmode(gpio.BOARD)
@@ -125,10 +125,10 @@ class DoorService:
             else:
                 print "Failed to read UID"
 
-        if os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
+        if self.door_opened and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
             # close the door
             gpio.output(self.DOOR_IO, gpio.LOW)
-            self.door_opened = 0
+            self.door_opened = False
 
     def _server_iter(self):
         if os.times()[4] > self.last_server_poll + self.SERVER_POLL:

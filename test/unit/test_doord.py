@@ -176,18 +176,19 @@ class TestDoorService(unittest.TestCase):
     @mock.patch('os.times')
     def test_door_closes_from_start(self, mock_time):
         RPi.GPIO.call_history = []
-        mock_time.return_code = (0, 0, 0, 0, -50)
+        mock_time.return_value = (0, 0, 0, 0, -50)
         self.ds.door_opened = -100
         self.ds.nfc.return_code = self.ds.nfc.MI_NOTAGERR
         self.ds._iter()
         assert len(RPi.GPIO.call_history) == 1
         assert RPi.GPIO.call_history[0]['pin'] == self.ds.DOOR_IO
         assert RPi.GPIO.call_history[0]['value'] == RPi.GPIO.LOW
+        assert self.ds.door_opened is False
 
     # os.times()[4] can be negative, which caused problems in the past
     # check we initialise event times to the startup value of os.tmes()[4]
     def test_event_times_init(self):
-        assert os.times()[4] - 1 < self.ds.door_opened <= os.times()[4]
+        assert self.ds.door_opened is False
         assert os.times()[4] - 1 < self.ds.last_server_poll <= os.times()[4]
         assert os.times()[4] - 1 < self.ds.led_last_time <= os.times()[4]
 
