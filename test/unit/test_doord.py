@@ -176,7 +176,7 @@ class TestDoorService(unittest.TestCase):
     @mock.patch('os.times')
     def test_door_closes_from_start(self, mock_time):
         RPi.GPIO.call_history = []
-        mock_time.side_effect = -50
+        mock_time.return_code = (0, 0, 0, 0, -50)
         self.ds.door_opened = -100
         self.ds.nfc.return_code = self.ds.nfc.MI_NOTAGERR
         self.ds._iter()

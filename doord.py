@@ -125,7 +125,7 @@ class DoorService:
             else:
                 print "Failed to read UID"
 
-        if self.door_opened > 0 and os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
+        if os.times()[4] > self.door_opened + self.DOOR_OPEN_TIME:
             # close the door
             gpio.output(self.DOOR_IO, gpio.LOW)
             self.door_opened = 0
