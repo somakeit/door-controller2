@@ -3,4 +3,7 @@ crc16
 bcrypt
 requests[security]
 requests_mock
+mock
 pep8
+coverage
+pytest-cov
