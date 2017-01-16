@@ -7,3 +7,4 @@ mock
 pep8
 coverage
 pytest-cov
+paho-mqtt

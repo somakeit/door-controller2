@@ -14,6 +14,7 @@ import requests
 import RPi.GPIO as gpio
 sys.path.append("MFRC522-python")
 import MFRC522
+import paho.mqtt.client
 
 
 class DoorService:
@@ -27,6 +28,7 @@ class DoorService:
     MAGIC_TAG_TIMEOUT = 10  # seconds
     DEFAULT_SECTOR_A = 1
     DEFAULT_SECTOR_B = 2
+    mqtt = None
 
     def __init__(self):
 
@@ -61,10 +63,24 @@ class DoorService:
         gpio.output(self.LED_IO, gpio.LOW)
         gpio.setup(self.SWITCH_IO, gpio.IN, pull_up_down=gpio.PUD_UP)
 
+        if 'mqtt' in self.settings and self.settings['mqtt']['server'] is not None:
+            self.mqtt = paho.mqtt.client.Client()
+            self.mqtt.on_connect = self.mqtt_on_connect
+            if self.settings['mqtt']['secure'] is True:
+                self.mqtt.tls_set(("/etc/ssl/certs/ca-certificates.crt"))
+            elif self.settings['mqtt']['secure']:
+                self.mqtt.tls_set((self.settings['mqtt']['secure']))
+            self.mqtt.connect(self.settings['mqtt']['server'],
+                              port=self.settings['mqtt']['port'])
+            self.mqtt.loop_start()
+
         print "Initialised"
 
     def __del__(self):
         gpio.cleanup()
+        if self.mqtt is not None:
+            self.mqtt.disconnect()
+            self.mqtt.loop_stop()
         del self.nfc
         del self.db
 
@@ -107,6 +123,15 @@ class DoorService:
                         tag.log_auth(self.LOCATION, "allowed")
                         self.door_opened = os.times()[4]
                         gpio.output(self.DOOR_IO, gpio.HIGH)
+                        if self.mqtt is not None:
+                            self.mqtt.publish(self.settings['mqtt']['topic'],
+                                              payload=json.dumps({
+                                                  "member_id": self.db.get_tag_user(str(tag)),
+                                                  "member_name": self.db.get_user_name(self.db.get_tag_user(str(tag))),
+                                                  "roles": self.db.get_user_roles(self.db.get_tag_user(str(tag)))
+                                              }),
+                                              qos=0,
+                                              retain=True)
                     else:
                         print "Tag " + str(tag) + " authenticated but NOT keyholder"
                         tag.log_auth(self.LOCATION, "denied")
@@ -215,6 +240,9 @@ class DoorService:
                 if os.times()[4] > self.led_last_time + ledoff:
                     gpio.output(self.LED_IO, gpio.HIGH)
                     self.led_last_time = os.times()[4]
+
+    def mqtt_on_connect(self, client, userdata, flags, rc):
+        print("Connected to MQTT server: {}:{}".format(self.settings['mqtt']['server'], self.settings['mqtt']['port']))
 
 
 class Tag:

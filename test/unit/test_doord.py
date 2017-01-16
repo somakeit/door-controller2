@@ -11,6 +11,7 @@ import json
 import requests.exceptions
 import crc16
 import pep8
+import paho.mqtt.client
 
 sys.path.append(os.getcwd())
 sys.modules['MFRC522'] = __import__('mock_MFRC522')
@@ -281,6 +282,126 @@ class TestDoorService(unittest.TestCase):
         mock_init.side_effect = doord.TagException('Well that could have gone better')
         self.ds.init_tag()
         self.assertEqual(mock_init.call_count, 1)
+
+    @mock.patch('paho.mqtt.client.Client.publish')
+    @mock.patch('doord.Tag.authenticate')
+    def test_iter_mqtt_not_used(self, mock_tag_auth, mock_publish):
+        mock_tag_auth.return_value = (True, [4, 5])
+        self.ds._iter()
+        mock_publish.assert_not_called()
+
+    @mock.patch('paho.mqtt.client.Client.publish')
+    @mock.patch('doord.Tag.authenticate')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_iter_mqtt_publish(self, mock_get_user_roles, mock_get_user_name, mock_get_tag_user, mock_tag_auth, mock_publish):
+        self.ds.mqtt = paho.mqtt.client.Client()
+        mock_tag_auth.return_value = (True, [4, 5])
+        self.ds.settings['mqtt'] = dict()
+        self.ds.settings['mqtt']['topic'] = "some/thing"
+        mock_get_tag_user.return_value = "00042"
+        mock_get_user_name.return_value = "George Lathenby"
+        mock_get_user_roles.return_value = [4, 5]
+        self.ds._iter()
+        payload = {
+            "member_id": "00042",
+            "member_name": "George Lathenby",
+            "roles": [
+                4,
+                5
+            ]
+        }
+        self.assertEqual(mock_publish.call_count, 1)
+        self.assertEqual(mock_publish.call_args_list[0][0], ("some/thing",))
+        self.assertEqual(json.loads(mock_publish.call_args_list[0][1]['payload']), payload)
+        self.assertEqual(mock_publish.call_args_list[0][1]['qos'], 0)
+        self.assertTrue(mock_publish.call_args_list[0][1]['retain'])
+
+
+class TestMQTTConfig(unittest.TestCase):
+
+    @requests_mock.mock()
+    @mock.patch('paho.mqtt.client.Client.connect')
+    def test_mqtt_not_initialised(self, internet, mock_mqtt_con):
+        reload(RPi.GPIO)
+        internet.get("https://example.com/rfid", text='{}')
+        f = open('doorrc', 'w')
+        # Minimum viable doorrc file, fill in extras in methods
+        f.write('''
+            {
+                "api_key": "lol",
+                "server_url": "https://example.com/rfid",
+                "init_tag_id": "",
+                "pull_db_tag_id": "",
+                "member_role_id": 4,
+                "keyholder_role_id": 5,
+                "location_name": ""
+            }
+            ''')
+        f.close()
+        self.ds = doord.DoorService()
+        mock_mqtt_con.assert_not_called()
+        self.assertIsNone(self.ds.mqtt)
+        del(self.ds)
+
+    @requests_mock.mock()
+    @mock.patch('paho.mqtt.client.Client.connect')
+    def test_mqtt_initialised2(self, internet, mock_mqtt_con):
+        reload(RPi.GPIO)
+        internet.get("https://example.com/rfid", text='{}')
+        f = open('doorrc', 'w')
+        # Minimum viable doorrc file, fill in extras in methods
+        f.write('''
+            {
+                "api_key": "lol",
+                "server_url": "https://example.com/rfid",
+                "init_tag_id": "",
+                "pull_db_tag_id": "",
+                "member_role_id": 4,
+                "keyholder_role_id": 5,
+                "location_name": "",
+                "mqtt": {
+                    "server": null
+                }
+            }
+            ''')
+        f.close()
+        self.ds = doord.DoorService()
+        mock_mqtt_con.assert_not_called()
+        self.assertIsNone(self.ds.mqtt)
+        del(self.ds)
+
+    @requests_mock.mock()
+    @mock.patch('paho.mqtt.client.Client.connect')
+    def test_mqtt_init(self, internet, mock_mqtt_con):
+        reload(RPi.GPIO)
+        internet.get("https://example.com/rfid", text='{}')
+        f = open('doorrc', 'w')
+        # Minimum viable doorrc file, fill in extras in methods
+        f.write('''
+            {
+                "api_key": "lol",
+                "server_url": "https://example.com/rfid",
+                "init_tag_id": "",
+                "pull_db_tag_id": "",
+                "member_role_id": 4,
+                "keyholder_role_id": 5,
+                "location_name": "",
+                "mqtt": {
+                    "server": "testmqttserver",
+                    "port": 1883,
+                    "user": "steve",
+                    "password": "1234",
+                    "secure": true,
+                    "topic": "some/thing"
+                }
+            }
+            ''')
+        f.close()
+        self.ds = doord.DoorService()
+        self.assertTrue(mock_mqtt_con.called)
+        del(self.ds)
 
 
 class TestTag(unittest.TestCase):
