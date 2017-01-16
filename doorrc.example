@@ -6,4 +6,12 @@
     "keyholder_role_id": 5,
     "member_role_id": 4,
     "location_name": "DOOR1"
+    "mqtt": {
+        "server": none,
+        "port": 1883,
+        "user": "",
+        "password": "",
+        "secure": true,
+        "topic": "some/topic"
+    }
 }
