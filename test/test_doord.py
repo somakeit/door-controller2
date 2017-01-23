@@ -1791,8 +1791,8 @@ class TestTag(unittest.TestCase):
         self.assertTrue(mock_db_keyb_a.called)
         self.assertTrue(mock_db_keya_b.called)
         self.assertTrue(mock_db_keya_a.called)
-        mock_db_secret_b.called
-        mock_db_secret_a.called
+        self.assertTrue(mock_db_secret_b.called)
+        self.assertTrue(mock_db_secret_a.called)
         mock_db_sector_a.assert_called_with('fedcba98', 3)
         mock_db_sector_b.assert_called_with('fedcba98', 4)
         mock_db_count.assert_called_with('fedcba98', 1)
