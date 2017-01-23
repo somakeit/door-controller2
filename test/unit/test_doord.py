@@ -374,7 +374,8 @@ class TestMQTTConfig(unittest.TestCase):
 
     @requests_mock.mock()
     @mock.patch('paho.mqtt.client.Client.connect')
-    def test_mqtt_init(self, internet, mock_mqtt_con):
+    @mock.patch('paho.mqtt.client.Client.tls_set')
+    def test_mqtt_init(self, internet, mock_tls_set, mock_mqtt_con):
         reload(RPi.GPIO)
         internet.get("https://example.com/rfid", text='{}')
         f = open('doorrc', 'w')
