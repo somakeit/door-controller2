@@ -279,7 +279,7 @@ class Tag:
         self.unselect()
 
     # attempt the whole authentication process with this tag
-    def authenticate(self, location="default"):
+    def authenticate(self):
         sector_a_ok = True
         sector_b_ok = True
 
