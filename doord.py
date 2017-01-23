@@ -70,6 +70,12 @@ class DoorService:
                 self.mqtt.tls_set(("/etc/ssl/certs/ca-certificates.crt"))
             elif self.settings['mqtt']['secure']:
                 self.mqtt.tls_set((self.settings['mqtt']['secure']))
+            if 'user' in self.settings['mqtt']:
+                password = None
+                if 'password' in self.settings['mqtt']:
+                    password = self.settings['mqtt']['password']
+                self.mqtt.username_pw_set(self.settings['mqtt']['user'], password=password)
+
             self.mqtt.connect(self.settings['mqtt']['server'],
                               port=self.settings['mqtt']['port'])
             self.mqtt.loop_start()

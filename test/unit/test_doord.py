@@ -375,7 +375,8 @@ class TestMQTTConfig(unittest.TestCase):
     @requests_mock.mock()
     @mock.patch('paho.mqtt.client.Client.connect')
     @mock.patch('paho.mqtt.client.Client.tls_set')
-    def test_mqtt_init(self, internet, mock_tls_set, mock_mqtt_con):
+    @mock.patch('paho.mqtt.client.Client.username_pw_set')
+    def test_mqtt_init(self, internet, mock_user_set, mock_tls_set, mock_mqtt_con):
         reload(RPi.GPIO)
         internet.get("https://example.com/rfid", text='{}')
         f = open('doorrc', 'w')
@@ -402,6 +403,8 @@ class TestMQTTConfig(unittest.TestCase):
         f.close()
         self.ds = doord.DoorService()
         self.assertTrue(mock_mqtt_con.called)
+        mock_tls_set.assert_called_once_with('/etc/ssl/certs/ca-certificates.crt')
+        mock_user_set.assert_called_once_with("steve", password='1234')
         del(self.ds)
 
 
