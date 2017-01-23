@@ -7,6 +7,8 @@ It mitigates known issues in Mifare so far as is possible.
 
 For a detailed specifiction, see the [wiki](https://wiki.somakeit.org.uk/wiki/The_Door).
 
+master is unstable, it is suggested that production instances use the most recent release.
+
 ## Installing
 This is a pyrhon 2 program designed to run on a raspberry pi, though any posixy platform with spi & gpio should work.
 
@@ -38,6 +40,13 @@ This is a pyrhon 2 program designed to run on a raspberry pi, though any posixy 
     * keyholder_role_id is the numeric id of the keyholder role in your members are, usually only these people can get in.
     * member_role_id is the id of members, they can only get in if pin 11 is LOW.
     * location_name is free text used for logging
+    * mqtt is an optional key which enables publishing of auths to an mqtt broker, it's options are:
+        * server required server to connect to
+        * port required port to connect to
+        * user optional username, default = no username
+        * password optional password, default = no password
+        * secure optional flag to use tls encryption, default = true. "true" = use authenticated TLS. "false" = do not use TLS. \<path_to_cert> = use TLS and authenticate using this certificate (self signing). There is no option to use TLS with no authentication (insecure mode).
+        * topic required base for topic, auths will be published to \<this_path>/\<tag_id>.
 * copy the init script or systemd serivice file to the right directory and edit the values in it.
     * Make sure you set a user to run the service and that user is in the gpio and spi groups.
 * Running the service at boot:
