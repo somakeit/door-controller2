@@ -1076,8 +1076,8 @@ if __name__ == '__main__':
         settings = json.loads(rcfile.read())
         rcfile.close()
 
-        self.nfc = MFRC522.MFRC522()
-        self.db = EntryDatabase(self.settings['server_url'], self.settings['api_key'])
+        nfc = MFRC522.MFRC522()
+        db = EntryDatabase(settings['server_url'], settings['api_key'])
         nfc = MFRC522.MFRC522()
         db = EntryDatabase(settings['server_url'], settings['api_key'])
         if sys.argv[1] == "init":
