@@ -81,8 +81,6 @@ class DoorService:
         if self.mqtt is not None:
             self.mqtt.disconnect()
             self.mqtt.loop_stop()
-        del self.nfc
-        del self.db
 
     def main(self):
         while True:
