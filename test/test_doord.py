@@ -2506,8 +2506,8 @@ class TestCodeFormat(unittest.TestCase):
         pep8style = pep8.StyleGuide(quiet=False, config_file='tox.ini')
         result = pep8style.check_files([
             'doord.py',
-            'test/unit/test_doord.py',
-            'test/unit/mock_MFRC522.py'])
+            'test/test_doord.py',
+            'test/mock_MFRC522.py'])
         self.assertEqual(result.total_errors, 0, "Found code style errors (and warnings).")
 
 if __name__ == '__main__':
