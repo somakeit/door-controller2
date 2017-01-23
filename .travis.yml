@@ -4,7 +4,7 @@ language: python
 python:
 - '2.7'
 install: pip install -r test/unit/requirements.txt
-script: python test/unit/test_doord.py
+script: py.test -v test/unit/
 notifications:
   slack:
     secure: XgWkdrur+BtZjeYOmki2Fq22vaoO7Vn7XhK5B2obp2DoYNtlMb5p/IOv4WyeeWZOqqmShR2sMkCOmVcPDwxT3yzw31PVaGQhL/j89QpLqD45rYDg4TzgpdWnVLl3KOj6ZsYF9iiuHQ5NCYH9UsToR7Sxp0HoVj+bIvN9G5UejROwD/KKGmBeOrzbfCrmPkaZlP0TRAb9KPp/f8yERKnLjpgDJyFa/s968mTw5RzcOjAbttdrVCznc1fhBCSnUJGFFqLVMFdsADTSCCSOUNyW2LfNuifmkHHDHo/AGRCSkJEcpPSIT4ojfOGJ3Ib8sbuFQ4VWKSWB4p0KkdScLoJjKJgPVYtH8gnl+xPcI83yGX1v8VULk0nFQ+dfVHfZvfvoB5rQjHrQgVHDhDD54U1yXeHIVE3HkGUtrJubQzfc+nQ1RGyJOe6iDO82IjUxYmofL/d4g0sqJoPAetHg8uzYRcTXo+Y6NiIucobI/zBehfp7t81Rw6HZzv0OTYogcuXZj59v1TCHNaLEwfeRfoyBEI+NckHvK98QafJ+4I+pTXjSWOHRDCSk+2ooXgp7vpnBns4Toi67cOckvJ5Zhux2BV8b3R2GuDMzGUnZjdRZD1MXSWiPFdO1L58pB32SqkBulYHfPIPJiuHNbA0nz9NDR+ty4K4f4Lkxdvj+s3Xs8pI=
