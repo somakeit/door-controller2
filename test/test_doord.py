@@ -318,6 +318,34 @@ class TestDoorService(unittest.TestCase):
         self.assertEqual(mock_publish.call_args_list[0][1]['qos'], 0)
         self.assertTrue(mock_publish.call_args_list[0][1]['retain'])
 
+    @mock.patch('paho.mqtt.client.Client.publish')
+    @mock.patch('doord.Tag.authenticate')
+    @mock.patch('doord.EntryDatabase.get_tag_user')
+    @mock.patch('doord.EntryDatabase.get_user_name')
+    @mock.patch('doord.EntryDatabase.get_user_roles')
+    def test_iter_mqtt_publish_extra_slash(self, mock_get_user_roles, mock_get_user_name, mock_get_tag_user, mock_tag_auth, mock_publish):
+        self.ds.mqtt = paho.mqtt.client.Client()
+        mock_tag_auth.return_value = (True, [4, 5])
+        self.ds.settings['mqtt'] = dict()
+        self.ds.settings['mqtt']['topic'] = "some/thing/"
+        mock_get_tag_user.return_value = "00042"
+        mock_get_user_name.return_value = "George Lathenby"
+        mock_get_user_roles.return_value = [4, 5]
+        self.ds._iter()
+        payload = {
+            "member_id": "00042",
+            "member_name": "George Lathenby",
+            "roles": [
+                4,
+                5
+            ]
+        }
+        self.assertEqual(mock_publish.call_count, 1)
+        self.assertEqual(mock_publish.call_args_list[0][0], ("some/thing/fedcba98",))
+        self.assertEqual(json.loads(mock_publish.call_args_list[0][1]['payload']), payload)
+        self.assertEqual(mock_publish.call_args_list[0][1]['qos'], 0)
+        self.assertTrue(mock_publish.call_args_list[0][1]['retain'])
+
 
 class TestMQTTConfig(unittest.TestCase):
 
@@ -394,6 +422,41 @@ class TestMQTTConfig(unittest.TestCase):
                 "mqtt": {
                     "server": "testmqttserver",
                     "port": 1883,
+                    "user": "steve",
+                    "password": "1234",
+                    "secure": true,
+                    "topic": "some/thing"
+                }
+            }
+            ''')
+        f.close()
+        self.ds = doord.DoorService()
+        self.assertTrue(mock_mqtt_con.called)
+        mock_tls_set.assert_called_once_with('/etc/ssl/certs/ca-certificates.crt')
+        mock_user_set.assert_called_once_with("steve", password='1234')
+        del(self.ds)
+
+    @requests_mock.mock()
+    @mock.patch('paho.mqtt.client.Client.connect')
+    @mock.patch('paho.mqtt.client.Client.tls_set')
+    @mock.patch('paho.mqtt.client.Client.username_pw_set')
+    @mock.patch('paho.mqtt.client.Client.loop_start')
+    def test_mqtt_init_no_port(self, internet, mock_loop_start, mock_user_set, mock_tls_set, mock_mqtt_con):
+        reload(RPi.GPIO)
+        internet.get("https://example.com/rfid", text='{}')
+        f = open('doorrc', 'w')
+        # Minimum viable doorrc file, fill in extras in methods
+        f.write('''
+            {
+                "api_key": "lol",
+                "server_url": "https://example.com/rfid",
+                "init_tag_id": "",
+                "pull_db_tag_id": "",
+                "member_role_id": 4,
+                "keyholder_role_id": 5,
+                "location_name": "",
+                "mqtt": {
+                    "server": "testmqttserver",
                     "user": "steve",
                     "password": "1234",
                     "secure": true,

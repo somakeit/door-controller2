@@ -76,6 +76,9 @@ class DoorService:
                     password = self.settings['mqtt']['password']
                 self.mqtt.username_pw_set(self.settings['mqtt']['user'], password=password)
 
+            if 'port' not in self.settings['mqtt']:
+                self.settings['mqtt']['port'] = 1883
+
             self.mqtt.connect(self.settings['mqtt']['server'],
                               port=self.settings['mqtt']['port'])
             self.mqtt.loop_start()
@@ -128,7 +131,7 @@ class DoorService:
                         self.door_opened = os.times()[4]
                         gpio.output(self.DOOR_IO, gpio.HIGH)
                         if self.mqtt is not None:
-                            self.mqtt.publish('{}/{}'.format(self.settings['mqtt']['topic'], str(tag)),
+                            self.mqtt.publish('{}/{}'.format(self.settings['mqtt']['topic'].rstrip('/'), str(tag)),
                                               payload=json.dumps({
                                                   "member_id": self.db.get_tag_user(str(tag)),
                                                   "member_name": self.db.get_user_name(self.db.get_tag_user(str(tag))),
