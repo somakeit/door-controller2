@@ -128,7 +128,7 @@ class DoorService:
                         self.door_opened = os.times()[4]
                         gpio.output(self.DOOR_IO, gpio.HIGH)
                         if self.mqtt is not None:
-                            self.mqtt.publish(self.settings['mqtt']['topic'],
+                            self.mqtt.publish('{}/{}'.format(self.settings['mqtt']['topic'], str(tag)),
                                               payload=json.dumps({
                                                   "member_id": self.db.get_tag_user(str(tag)),
                                                   "member_name": self.db.get_user_name(self.db.get_tag_user(str(tag))),

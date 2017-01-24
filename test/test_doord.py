@@ -313,7 +313,7 @@ class TestDoorService(unittest.TestCase):
             ]
         }
         self.assertEqual(mock_publish.call_count, 1)
-        self.assertEqual(mock_publish.call_args_list[0][0], ("some/thing",))
+        self.assertEqual(mock_publish.call_args_list[0][0], ("some/thing/fedcba98",))
         self.assertEqual(json.loads(mock_publish.call_args_list[0][1]['payload']), payload)
         self.assertEqual(mock_publish.call_args_list[0][1]['qos'], 0)
         self.assertTrue(mock_publish.call_args_list[0][1]['retain'])
